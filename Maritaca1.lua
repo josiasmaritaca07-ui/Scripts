@@ -1,605 +1,606 @@
--- ======================================================
--- MARITACA HUB | Native Black Edition (V28)
--- 100% NATIVO - Sem Fluent, sem link externo
--- By Maritaca
--- ======================================================
+-- ═══════════════════════════════════════════════════════════════════
+-- 🦜 MARITACA HUB v16 - UI FLUENTE + GK CORRIGIDO + REACH
+-- ═══════════════════════════════════════════════════════════════════
 
-print("[Maritaca] Iniciando V28...")
+local player = game.Players.LocalPlayer
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local StarterPack = game:GetService("StarterPack")
 
--- SERVIÇOS
-local CoreGui      = game:GetService("CoreGui")
-local Players      = game:GetService("Players")
-local RunService   = game:GetService("RunService")
-local Workspace    = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualInput = game:GetService("VirtualInputManager")
-local UserInput    = game:GetService("UserInputService")
-
-local LocalPlayer = Players.LocalPlayer
-local Character   = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-
-LocalPlayer.CharacterAdded:Connect(function(c)
-    Character = c
-    task.wait(0.5)
-    if State.SpeedEnabled then
-        local hum = c:FindFirstChildOfClass("Humanoid")
-        if hum then hum.WalkSpeed = GetSpeedValue(State.SpeedLevel) end
-    end
-end)
-
-print("[Maritaca] Serviços OK")
-
--- ======================================================
--- ESTADO
--- ======================================================
-local State = {
-    -- Reach
-    ReachEnabled = false,
-    ReachRange = 5,
-    ReachColor = Color3.fromRGB(0, 170, 255),
-    -- Auto Dive
-    AutoDiveEnabled = false,
-    AutoDiveRange = 30,
-    AutoDiveCooldown = 0.35,
-    AutoDiveMinSpeed = 6,
-    UseResetWelds = true,
-    UseGKButtons = true,
-    ForceVelocity = true,
-    DivePowerH = 60,
-    DivePowerV = 30,
-    -- Ball
-    ShowBallMarker = true,
-    TPEnabled = false,
-    TPRange = 15,
-    TPCooldown = 0.5,
-    MagnetEnabled = false,
-    MagnetRange = 20,
-    MagnetForce = 100,
-    -- Speed
-    SpeedEnabled = false,
-    SpeedLevel = 1,
+local config = {
+    reachEnabled = false,
+    autoDiveEnabled = false,
+    reachSize = 15,
+    showCircle = true,
+    detectedBall = nil,
+    scannerMode = false,
+    autoDiveMode = "auto",
+    autoDiveDelay = 0.3
 }
 
--- ======================================================
--- RESETWELDS
--- ======================================================
-local ResetWelds = ReplicatedStorage:FindFirstChild("ResetWelds")
-if not ResetWelds then
-    ResetWelds = ReplicatedStorage:FindFirstChild("ResetWelds", true)
+-- LIMPEZA
+local pGui = player:WaitForChild("PlayerGui")
+for _, v in pairs(pGui:GetChildren()) do
+    if v.Name:find("Maritaca") or v.Name == "DebugBola" then v:Destroy() end
 end
 
-local function FireResetWelds()
-    if not ResetWelds or not ResetWelds:IsA("RemoteEvent") then return false end
-    if not ResetWelds.OnClientEvent then return false end
-    pcall(function()
-        firesignal(ResetWelds.OnClientEvent, LocalPlayer)
-    end)
-    return true
-end
+-- ═══════════════════════════════════════════════════════════════════
+-- 🎨 UI PRINCIPAL (estilo FluentPro)
+-- ═══════════════════════════════════════════════════════════════════
+local sg = Instance.new("ScreenGui")
+sg.Name = "MaritacaHub"
+sg.ResetOnSpawn = false
+sg.IgnoreGuiInset = true
+sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+sg.Parent = pGui
 
--- ======================================================
--- SPEED
--- ======================================================
-local SPEED_TABLE = {
-    [1]=16,[2]=24,[3]=32,[4]=42,[5]=55,
-    [6]=70,[7]=88,[8]=105,[9]=125,[10]=150,
-}
-local function GetSpeedValue(l) return SPEED_TABLE[l] or 16 end
+-- BOTÃO FLUTUANTE 🦜
+local ballBtn = Instance.new("TextButton")
+ballBtn.Size = UDim2.new(0, 55, 0, 55)
+ballBtn.Position = UDim2.new(0, 15, 0.5, -27)
+ballBtn.BackgroundColor3 = Color3.fromRGB(30, 180, 80)
+ballBtn.Text = "🦜"
+ballBtn.TextSize = 28
+ballBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ballBtn.BorderSizePixel = 0
+ballBtn.AutoButtonColor = false
+ballBtn.Active = true
+ballBtn.ZIndex = 100
+ballBtn.Parent = sg
 
--- ======================================================
--- DETECTOR DE BOLA
--- ======================================================
-local BallCache = nil
-local LastBallScan = 0
+local bC = Instance.new("UICorner")
+bC.CornerRadius = UDim.new(1, 0)
+bC.Parent = ballBtn
 
-local function IsBall(obj)
-    if not obj or not obj:IsA("BasePart") then return 0 end
-    local n = obj.Name:lower()
-    if n == "football" or n == "ball" or n == "bola" or n == "soccerball" then return 4 end
-    if n:find("ball") or n:find("bola") then return 3 end
-    if obj:IsA("Part") and obj.Shape == Enum.PartType.Ball and obj.Size.Magnitude < 8 then return 2 end
-    return 0
-end
+local bS = Instance.new("UIStroke")
+bS.Color = Color3.fromRGB(255, 220, 50)
+bS.Thickness = 3
+bS.Parent = ballBtn
 
-local function GetBall()
-    if BallCache and BallCache.Parent and IsBall(BallCache) > 0 then return BallCache end
-    if tick() - LastBallScan < 0.3 then return BallCache end
-    LastBallScan = tick()
-    local best, bestScore = nil, 0
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        local s = IsBall(obj)
-        if s > bestScore then
-            best = obj
-            bestScore = s
-            if s == 4 then break end
-        end
-    end
-    BallCache = best
-    return BallCache
-end
-
--- ======================================================
--- GK BUTTONS
--- ======================================================
-local function FireGKButton(key)
-    local pg = LocalPlayer:FindFirstChild("PlayerGui")
-    if not pg then return false end
-    local start = pg:FindFirstChild("Start", true)
-    if not start then return false end
-    local label = start:FindFirstChild("ImageLabel", true)
-    if not label then return false end
-    local btn = label:FindFirstChild("GK " .. key)
-    if not btn then return false end
-
-    if typeof(firesignal) == "function" then
-        pcall(function() firesignal(btn.MouseButton1Click) end)
-        pcall(function() firesignal(btn.MouseButton1Down) end)
-        pcall(function() firesignal(btn.Activated) end)
-    end
-    pcall(function()
-        if btn.AbsolutePosition and btn.AbsoluteSize then
-            local pos = btn.AbsolutePosition + (btn.AbsoluteSize / 2)
-            VirtualInput:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 1)
-            task.wait(0.01)
-            VirtualInput:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 1)
-        end
-    end)
-    return true
-end
-
-local function ExecuteDive(isRight, isHigh)
-    local root = Character and Character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-
-    if State.ForceVelocity then
-        local dirX = isRight and 1 or -1
-        local dirY = isHigh and 1 or 0.3
-        pcall(function()
-            root.AssemblyLinearVelocity = Vector3.new(dirX * State.DivePowerH, State.DivePowerV * dirY, 0)
-        end)
-    end
-
-    if State.UseGKButtons then
-        local key
-        if isRight and isHigh then key = "E"
-        elseif isRight and not isHigh then key = "C"
-        elseif not isRight and isHigh then key = "Q"
-        else key = "Z" end
-        FireGKButton(key)
-    end
-
-    if State.UseResetWelds then FireResetWelds() end
-end
-
--- ======================================================
--- CRIAR A GUI
--- ======================================================
-if CoreGui:FindFirstChild("MaritacaNativeGui") then
-    CoreGui.MaritacaNativeGui:Destroy()
-end
-
-local MainGui = Instance.new("ScreenGui")
-MainGui.Name = "MaritacaNativeGui"
-MainGui.ResetOnSpawn = false
-MainGui.IgnoreGuiInset = true
-MainGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-local ok, err = pcall(function() MainGui.Parent = CoreGui end)
-if not ok then
-    MainGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-end
-
-print("[Maritaca] GUI criada")
-
--- ======================================================
 -- JANELA PRINCIPAL
--- ======================================================
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Parent = MainGui
-MainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-MainFrame.BorderSizePixel = 0
-MainFrame.Position = UDim2.new(0.5, -160, 0.5, -220)
-MainFrame.Size = UDim2.new(0, 320, 0, 440)
-MainFrame.Active = true
-MainFrame.Draggable = true
+local win = Instance.new("Frame")
+win.Name = "MainWindow"
+win.Size = UDim2.new(0, 480, 0, 320)
+win.Position = UDim2.new(0.5, -240, 0.5, -160)
+win.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+win.BorderSizePixel = 0
+win.Visible = false
+win.ZIndex = 100
+win.Parent = sg
 
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 10)
-UICorner.Parent = MainFrame
+local winC = Instance.new("UICorner")
+winC.CornerRadius = UDim.new(0, 12)
+winC.Parent = win
 
-local UIStroke = Instance.new("UIStroke")
-UIStroke.Color = Color3.fromRGB(35, 35, 35)
-UIStroke.Thickness = 1
-UIStroke.Parent = MainFrame
+local winS = Instance.new("UIStroke")
+winS.Color = Color3.fromRGB(45, 45, 55)
+winS.Thickness = 1
+winS.Parent = win
 
--- TOPBAR
-local TopBar = Instance.new("Frame")
-TopBar.Parent = MainFrame
-TopBar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-TopBar.BorderSizePixel = 0
-TopBar.Size = UDim2.new(1, 0, 0, 42)
-TopBar.Position = UDim2.new(0, 0, 0, 0)
+-- ═══ HEADER ═══
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 42)
+header.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+header.BorderSizePixel = 0
+header.ZIndex = 101
+header.Parent = win
 
-local TopBarCorner = Instance.new("UICorner")
-TopBarCorner.CornerRadius = UDim.new(0, 10)
-TopBarCorner.Parent = TopBar
+local hC = Instance.new("UICorner")
+hC.CornerRadius = UDim.new(0, 12)
+hC.Parent = header
 
-local Title = Instance.new("TextLabel")
-Title.Parent = TopBar
-Title.Size = UDim2.new(1, -80, 1, 0)
-Title.Position = UDim2.new(0, 12, 0, 0)
-Title.Text = "Maritaca Hub"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 16
-Title.Font = Enum.Font.GothamBold
-Title.BackgroundTransparency = 1
-Title.TextXAlignment = Enum.TextXAlignment.Left
+local hFix = Instance.new("Frame")
+hFix.Size = UDim2.new(1, 0, 0.5, 0)
+hFix.Position = UDim2.new(0, 0, 0.5, 0)
+hFix.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+hFix.BorderSizePixel = 0
+hFix.ZIndex = 101
+hFix.Parent = header
 
-local Subtitle = Instance.new("TextLabel")
-Subtitle.Parent = TopBar
-Subtitle.Size = UDim2.new(1, -80, 0, 14)
-Subtitle.Position = UDim2.new(0, 12, 1, -16)
-Subtitle.Text = "Black Edition"
-Subtitle.TextColor3 = Color3.fromRGB(0, 170, 255)
-Subtitle.TextSize = 10
-Subtitle.Font = Enum.Font.Gotham
-Subtitle.BackgroundTransparency = 1
-Subtitle.TextXAlignment = Enum.TextXAlignment.Left
+-- Ícone 🦜 no header
+local headerIcon = Instance.new("TextLabel")
+headerIcon.Size = UDim2.new(0, 32, 0, 32)
+headerIcon.Position = UDim2.new(0, 10, 0, 5)
+headerIcon.BackgroundColor3 = Color3.fromRGB(30, 180, 80)
+headerIcon.Text = "🦜"
+headerIcon.TextSize = 18
+headerIcon.BorderSizePixel = 0
+headerIcon.ZIndex = 102
+headerIcon.Parent = header
 
-local CloseBtn = Instance.new("TextButton")
-CloseBtn.Parent = TopBar
-CloseBtn.Size = UDim2.new(0, 28, 0, 28)
-CloseBtn.Position = UDim2.new(1, -38, 0.5, -14)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-CloseBtn.Text = "×"
-CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.TextSize = 22
-CloseBtn.BorderSizePixel = 0
+local hiC = Instance.new("UICorner")
+hiC.CornerRadius = UDim.new(0, 8)
+hiC.Parent = headerIcon
 
-local CloseCorner = Instance.new("UICorner")
-CloseCorner.CornerRadius = UDim.new(1, 0)
-CloseCorner.Parent = CloseBtn
+-- Título
+local headerTitle = Instance.new("TextLabel")
+headerTitle.Size = UDim2.new(0, 200, 0, 42)
+headerTitle.Position = UDim2.new(0, 50, 0, 0)
+headerTitle.BackgroundTransparency = 1
+headerTitle.Text = "MARITACA HUB"
+headerTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+headerTitle.TextSize = 15
+headerTitle.Font = Enum.Font.GothamBold
+headerTitle.TextXAlignment = Enum.TextXAlignment.Left
+headerTitle.ZIndex = 102
+headerTitle.Parent = header
 
-local CloseStroke = Instance.new("UIStroke")
-CloseStroke.Color = Color3.fromRGB(60, 60, 60)
-CloseStroke.Thickness = 1
-CloseStroke.Parent = CloseBtn
+-- Subtítulo
+local headerSub = Instance.new("TextLabel")
+headerSub.Size = UDim2.new(0, 200, 0, 15)
+headerSub.Position = UDim2.new(0, 50, 0, 24)
+headerSub.BackgroundTransparency = 1
+headerSub.Text = "v16 • The Classic Soccer"
+headerSub.TextColor3 = Color3.fromRGB(150, 150, 160)
+headerSub.TextSize = 10
+headerSub.Font = Enum.Font.Gotham
+headerSub.TextXAlignment = Enum.TextXAlignment.Left
+headerSub.ZIndex = 102
+headerSub.Parent = header
 
-CloseBtn.MouseButton1Click:Connect(function()
-    MainFrame.Visible = false
-end)
+-- Botão fechar
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 28, 0, 28)
+closeBtn.Position = UDim2.new(1, -36, 0, 7)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeBtn.Text = "×"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.TextSize = 20
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.BorderSizePixel = 0
+closeBtn.AutoButtonColor = false
+closeBtn.ZIndex = 102
+closeBtn.Parent = header
 
--- DIVISÓRIA
-local Divider = Instance.new("Frame")
-Divider.Parent = MainFrame
-Divider.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-Divider.BorderSizePixel = 0
-Divider.Size = UDim2.new(1, 0, 0, 1)
-Divider.Position = UDim2.new(0, 0, 0, 42)
+local cC = Instance.new("UICorner")
+cC.CornerRadius = UDim.new(0, 6)
+cC.Parent = closeBtn
 
--- ======================================================
--- ABAS (BOTÕES NO TOPO)
--- ======================================================
-local TabBar = Instance.new("Frame")
-TabBar.Parent = MainFrame
-TabBar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-TabBar.BorderSizePixel = 0
-TabBar.Size = UDim2.new(1, 0, 0, 32)
-TabBar.Position = UDim2.new(0, 0, 0, 43)
+closeBtn.MouseButton1Click:Connect(function() win.Visible = false end)
 
-local TabBarList = Instance.new("UIListLayout")
-TabBarList.FillDirection = Enum.FillDirection.Horizontal
-TabBarList.SortOrder = Enum.SortOrder.LayoutOrder
-TabBarList.Padding = UDim.new(0, 2)
-TabBarList.Parent = TabBar
+-- ═══ SIDEBAR ═══
+local sidebar = Instance.new("Frame")
+sidebar.Size = UDim2.new(0, 130, 1, -42)
+sidebar.Position = UDim2.new(0, 0, 0, 42)
+sidebar.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+sidebar.BorderSizePixel = 0
+sidebar.ZIndex = 101
+sidebar.Parent = win
 
-local TabBarPad = Instance.new("UIPadding")
-TabBarPad.PaddingLeft = UDim.new(0, 6)
-TabBarPad.PaddingTop = UDim.new(0, 4)
-TabBarPad.Parent = TabBar
+local sbC = Instance.new("UICorner")
+sbC.CornerRadius = UDim.new(0, 12)
+sbC.Parent = sidebar
 
--- CONTAINER DOS CONTEÚDOS
-local ContentFrame = Instance.new("Frame")
-ContentFrame.Parent = MainFrame
-ContentFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-ContentFrame.BorderSizePixel = 0
-ContentFrame.Position = UDim2.new(0, 0, 0, 76)
-ContentFrame.Size = UDim2.new(1, 0, 1, -76)
+-- Tabs
+local tabsFrame = Instance.new("Frame")
+tabsFrame.Size = UDim2.new(1, -12, 1, -12)
+tabsFrame.Position = UDim2.new(0, 6, 0, 6)
+tabsFrame.BackgroundTransparency = 1
+tabsFrame.ZIndex = 102
+tabsFrame.Parent = sidebar
 
-local Pages = {}
-local TabButtons = {}
+local tabsLayout = Instance.new("UIListLayout")
+tabsLayout.Padding = UDim.new(0, 4)
+tabsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+tabsLayout.Parent = tabsFrame
 
-local function CreatePage(name)
-    local page = Instance.new("ScrollingFrame")
-    page.Name = name .. "Page"
-    page.Parent = ContentFrame
-    page.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    page.BorderSizePixel = 0
+-- Área de conteúdo
+local contentArea = Instance.new("Frame")
+contentArea.Size = UDim2.new(1, -140, 1, -50)
+contentArea.Position = UDim2.new(0, 135, 0, 47)
+contentArea.BackgroundTransparency = 1
+contentArea.ZIndex = 101
+contentArea.Parent = win
+
+local pages = {}
+local tabButtons = {}
+
+local function createTab(name, icon)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 34)
+    btn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+    btn.Text = "  " .. icon .. "  " .. name
+    btn.TextColor3 = Color3.fromRGB(200, 200, 210)
+    btn.Font = Enum.Font.GothamMedium
+    btn.TextSize = 12
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.BorderSizePixel = 0
+    btn.AutoButtonColor = false
+    btn.ZIndex = 103
+    btn.Parent = tabsFrame
+
+    local bc = Instance.new("UICorner")
+    bc.CornerRadius = UDim.new(0, 8)
+    bc.Parent = btn
+
+    local page = Instance.new("Frame")
     page.Size = UDim2.new(1, 0, 1, 0)
-    page.Position = UDim2.new(0, 0, 0, 0)
-    page.CanvasSize = UDim2.new(0, 0, 0, 0)
-    page.ScrollBarThickness = 3
-    page.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 60)
+    page.BackgroundTransparency = 1
     page.Visible = false
+    page.ZIndex = 102
+    page.Parent = contentArea
 
-    local pad = Instance.new("UIPadding")
-    pad.PaddingTop = UDim.new(0, 8)
-    pad.PaddingBottom = UDim.new(0, 8)
-    pad.PaddingLeft = UDim.new(0, 10)
-    pad.PaddingRight = UDim.new(0, 10)
-    pad.Parent = page
+    local pl = Instance.new("UIListLayout")
+    pl.Padding = UDim.new(0, 6)
+    pl.SortOrder = Enum.SortOrder.LayoutOrder
+    pl.Parent = page
 
-    local list = Instance.new("UIListLayout")
-    list.SortOrder = Enum.SortOrder.LayoutOrder
-    list.Padding = UDim.new(0, 6)
-    list.Parent = page
+    pages[name] = page
+    tabButtons[name] = btn
 
-    list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        page.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y + 20)
+    btn.MouseButton1Click:Connect(function()
+        for n, p in pairs(pages) do
+            p.Visible = (n == name)
+            tabButtons[n].BackgroundColor3 = (n == name) and Color3.fromRGB(30, 180, 80) or Color3.fromRGB(28, 28, 36)
+            tabButtons[n].TextColor3 = (n == name) and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(200, 200, 210)
+        end
     end)
 
-    Pages[name] = page
     return page
 end
 
-local function CreateTabButton(name)
+-- Cria as abas
+local homePage = createTab("Início", "🏠")
+local reachPage = createTab("Reach", "⚽")
+local gkPage = createTab("Goleiro", "🥅")
+local divePage = createTab("Auto Dive", "🏊")
+local configPage = createTab("Config", "⚙️")
+
+-- Abre primeira aba
+pages["Início"].Visible = true
+tabButtons["Início"].BackgroundColor3 = Color3.fromRGB(30, 180, 80)
+tabButtons["Início"].TextColor3 = Color3.fromRGB(255, 255, 255)
+
+-- Helper pra criar botões
+local function makeBtn(parent, text, color)
     local btn = Instance.new("TextButton")
-    btn.Parent = TabBar
-    btn.Size = UDim2.new(0, 65, 0, 24)
-    btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    btn.Size = UDim2.new(1, 0, 0, 36)
+    btn.BackgroundColor3 = color or Color3.fromRGB(38, 38, 48)
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamMedium
+    btn.TextSize = 12
     btn.BorderSizePixel = 0
-    btn.Text = name
-    btn.TextColor3 = Color3.fromRGB(150, 150, 150)
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 11
+    btn.AutoButtonColor = false
+    btn.ZIndex = 103
+    btn.Parent = parent
 
     local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 5)
+    c.CornerRadius = UDim.new(0, 8)
     c.Parent = btn
-
-    local s = Instance.new("UIStroke")
-    s.Color = Color3.fromRGB(40, 40, 40)
-    s.Thickness = 1
-    s.Parent = btn
-
-    TabButtons[name] = { btn = btn, stroke = s }
-
-    btn.MouseButton1Click:Connect(function()
-        for n, page in pairs(Pages) do
-            page.Visible = (n == name)
-        end
-        for n, data in pairs(TabButtons) do
-            if n == name then
-                data.btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-                data.stroke.Color = Color3.fromRGB(0, 170, 255)
-            else
-                data.btn.TextColor3 = Color3.fromRGB(150, 150, 150)
-                data.stroke.Color = Color3.fromRGB(40, 40, 40)
-            end
-        end
-    end)
-
     return btn
 end
 
--- ======================================================
--- ELEMENTOS DE UI
--- ======================================================
-local function CreateSection(parent, text)
+-- Helper pra criar labels
+local function makeLabel(parent, text, color, height)
     local lbl = Instance.new("TextLabel")
-    lbl.Parent = parent
-    lbl.Size = UDim2.new(1, 0, 0, 22)
-    lbl.BackgroundTransparency = 1
+    lbl.Size = UDim2.new(1, 0, 0, height or 26)
+    lbl.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
     lbl.Text = text
-    lbl.TextColor3 = Color3.fromRGB(0, 170, 255)
-    lbl.Font = Enum.Font.GothamBold
-    lbl.TextSize = 12
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-end
-
-local function CreateToggle(parent, text, default, callback)
-    local btn = Instance.new("TextButton")
-    btn.Parent = parent
-    btn.Size = UDim2.new(1, 0, 0, 34)
-    btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    btn.BorderSizePixel = 0
-    btn.Text = text
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.Gotham
-    btn.TextSize = 13
-    btn.TextXAlignment = Enum.TextXAlignment.Left
-
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 6)
-    c.Parent = btn
-
-    local s = Instance.new("UIStroke")
-    s.Color = Color3.fromRGB(35, 35, 35)
-    s.Thickness = 1
-    s.Parent = btn
-
-    local pad = Instance.new("UIPadding")
-    pad.PaddingLeft = UDim.new(0, 12)
-    pad.Parent = btn
-
-    local ind = Instance.new("Frame")
-    ind.Parent = btn
-    ind.Size = UDim2.new(0, 12, 0, 12)
-    ind.Position = UDim2.new(1, -24, 0.5, -6)
-    ind.BackgroundColor3 = default and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(60, 60, 60)
-    ind.BorderSizePixel = 0
-
-    local indC = Instance.new("UICorner")
-    indC.CornerRadius = UDim.new(1, 0)
-    indC.Parent = ind
-
-    local state = default
-    btn.MouseButton1Click:Connect(function()
-        state = not state
-        ind.BackgroundColor3 = state and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(60, 60, 60)
-        callback(state)
-    end)
-end
-
-local function CreateButton(parent, text, callback)
-    local btn = Instance.new("TextButton")
-    btn.Parent = parent
-    btn.Size = UDim2.new(1, 0, 0, 34)
-    btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    btn.BorderSizePixel = 0
-    btn.Text = text
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 13
-
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 6)
-    c.Parent = btn
-
-    local s = Instance.new("UIStroke")
-    s.Color = Color3.fromRGB(35, 35, 35)
-    s.Thickness = 1
-    s.Parent = btn
-
-    btn.MouseButton1Click:Connect(function()
-        callback()
-    end)
-end
-
-local function CreateSlider(parent, text, min, max, default, callback)
-    local frame = Instance.new("Frame")
-    frame.Parent = parent
-    frame.Size = UDim2.new(1, 0, 0, 48)
-    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    frame.BorderSizePixel = 0
-
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 6)
-    c.Parent = frame
-
-    local s = Instance.new("UIStroke")
-    s.Color = Color3.fromRGB(35, 35, 35)
-    s.Thickness = 1
-    s.Parent = frame
-
-    local lbl = Instance.new("TextLabel")
-    lbl.Parent = frame
-    lbl.Size = UDim2.new(1, -20, 0, 20)
-    lbl.Position = UDim2.new(0, 12, 0, 6)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = text .. ": " .. default
-    lbl.TextColor3 = Color3.fromRGB(220, 220, 220)
+    lbl.TextColor3 = color or Color3.fromRGB(200, 200, 210)
     lbl.Font = Enum.Font.Gotham
-    lbl.TextSize = 12
+    lbl.TextSize = 11
+    lbl.BorderSizePixel = 0
     lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.TextWrapped = true
+    lbl.ZIndex = 103
+    lbl.Parent = parent
 
-    local barBg = Instance.new("Frame")
-    barBg.Parent = frame
-    barBg.Size = UDim2.new(1, -24, 0, 6)
-    barBg.Position = UDim2.new(0, 12, 0, 32)
-    barBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    barBg.BorderSizePixel = 0
-
-    local bc = Instance.new("UICorner")
-    bc.CornerRadius = UDim.new(1, 0)
-    bc.Parent = barBg
-
-    local barFill = Instance.new("Frame")
-    barFill.Parent = barBg
-    barFill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
-    barFill.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-    barFill.BorderSizePixel = 0
-
-    local fc = Instance.new("UICorner")
-    fc.CornerRadius = UDim.new(1, 0)
-    fc.Parent = barFill
-
-    local clicker = Instance.new("TextButton")
-    clicker.Parent = frame
-    clicker.Size = UDim2.new(1, -24, 0, 30)
-    clicker.Position = UDim2.new(0, 12, 0, 18)
-    clicker.BackgroundTransparency = 1
-    clicker.Text = ""
-
-    local dragging = false
-
-    local function update(x)
-        local rel = math.clamp((x - barBg.AbsolutePosition.X) / barBg.AbsoluteSize.X, 0, 1)
-        local v = math.floor(min + (max - min) * rel)
-        barFill.Size = UDim2.new(rel, 0, 1, 0)
-        lbl.Text = text .. ": " .. v
-        callback(v)
-    end
-
-    clicker.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-           or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            update(input.Position.X)
-        end
-    end)
-    clicker.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-           or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end)
-    clicker.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-                         or input.UserInputType == Enum.UserInputType.Touch) then
-            update(input.Position.X)
-        end
-    end)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = lbl
+    return lbl
 end
 
-print("[Maritaca] Funções de UI OK")
+-- ═══════════════════════════════════════════════════════════════════
+-- 🏠 ABA INÍCIO
+-- ═══════════════════════════════════════════════════════════════════
+local welcome = makeLabel(homePage, "  Bem-vindo ao Maritaca Hub!\n  Use o menu lateral para navegar.", Color3.fromRGB(255, 220, 50), 40)
+local ballStatus = makeLabel(homePage, "  🔍 Procurando bola...", Color3.fromRGB(100, 255, 100), 32)
+local keyHelp = makeLabel(homePage, "  Atalhos:\n  [M] Abrir/Fechar Menu", Color3.fromRGB(150, 150, 160), 40)
 
--- ======================================================
--- CRIA AS PÁGINAS
--- ======================================================
-CreatePage("Reach")
-CreatePage("Auto Dive")
-CreatePage("Speed")
-CreatePage("Bola")
-CreatePage("Config")
+-- ═══════════════════════════════════════════════════════════════════
+-- ⚽ ABA REACH
+-- ═══════════════════════════════════════════════════════════════════
+local reachBtn = makeBtn(reachPage, "  Reach: DESLIGADO", Color3.fromRGB(200, 50, 50))
+local sizeBtn = makeBtn(reachPage, "  Tamanho: " .. config.reachSize .. " studs")
+local circleBtn = makeBtn(reachPage, "  Círculo: LIGADO", Color3.fromRGB(50, 150, 80))
 
-CreateTabButton("Reach")
-CreateTabButton("Auto Dive")
-CreateTabButton("Speed")
-CreateTabButton("Bola")
-CreateTabButton("Config")
+sizeBtn.MouseButton1Click:Connect(function()
+    config.reachSize = config.reachSize + 5
+    if config.reachSize > 40 then config.reachSize = 5 end
+    sizeBtn.Text = "  Tamanho: " .. config.reachSize .. " studs"
+    if circle then circle.Size = Vector3.new(config.reachSize, config.reachSize, config.reachSize) end
+end)
 
--- ======================================================
--- POPULA REACH
--- ======================================================
-CreateSection(Pages.Reach, "Reach Configuration")
-CreateToggle(Pages.Reach, "Enable Reach", false, function(v) State.ReachEnabled = v end)
-CreateSlider(Pages.Reach, "Reach Range", 1, 15, 5, function(v) State.ReachRange = v end)
+-- ═══════════════════════════════════════════════════════════════════
+-- 🥅 ABA GOLEIRO
+-- ═══════════════════════════════════════════════════════════════════
+local gkInfo = makeLabel(gkPage, "  Comandos do Goleiro:", Color3.fromRGB(255, 220, 50), 22)
 
--- ======================================================
--- POPULA AUTO DIVE
--- ======================================================
-CreateSection(Pages["Auto Dive"], "Auto Dive")
-CreateToggle(Pages["Auto Dive"], "Enable Auto Dive", false, function(v) State.AutoDiveEnabled = v end)
-CreateSlider(Pages["Auto Dive"], "Distancia", 10, 80, 30, function(v) State.AutoDiveRange = v end)
-CreateSlider(Pages["Auto Dive"], "Cooldown (x0.1)", 2, 20, 4, function(v) State.AutoDiveCooldown = v/10 end)
-CreateToggle(Pages["Auto Dive"], "Usar ResetWelds", true, function(v) State.UseResetWelds = v end)
-CreateToggle(Pages["Auto Dive"], "Usar botoes GK", true, function(v) State.UseGKButtons = v end)
-CreateToggle(Pages["Auto Dive"], "Impulso fisico", true, function(v) State.ForceVelocity = v end)
-CreateToggle(Pages["Auto Dive"], "Marcador na bola", true, function(v) State.ShowBallMarker = v end)
+-- Grid de botões GK (2 colunas)
+local gkGrid = Instance.new("Frame")
+gkGrid.Size = UDim2.new(1, 0, 0, 145)
+gkGrid.BackgroundTransparency = 1
+gkGrid.ZIndex = 103
+gkGrid.Parent = gkPage
 
-CreateSection(Pages["Auto Dive"], "Teste GK")
-CreateButton(Pages["Auto Dive"], "Testar ResetWelds", function() FireResetWelds() end)
-CreateButton(Pages["Auto Dive"], "GK Z (Esq Baixo)", function() ExecuteDive(false, false) end)
-CreateButton(Pages["Auto Dive"], "GK C (Dir Baixo)", function() ExecuteDive(true, false) end)
-CreateButton(Pages["Auto Dive"], "GK Q (Esq Alto)",  function() ExecuteDive(false, true) end)
-CreateButton(Pages["Auto Dive"], "GK E (Dir Alto)",  function() ExecuteDive(true, true) end)
+local gkLayout = Instance.new("UIGridLayout")
+gkLayout.CellSize = UDim2.new(0.5, -3, 0, 32)
+gkLayout.CellPadding = UDim2.new(0, 6, 0, 6)
+gkLayout.SortOrder = Enum.SortOrder.LayoutOrder
+gkLayout.Parent = gkGrid
 
--- ======================================================
--- POPULA SPEED
--- ======================================================
-CreateSection(Pages.Speed, "Sistema de Velocidade")
-CreateToggle(Pages.Speed, "Enable Speed", false, function(v)
-    State.SpeedEnabl
+local function makeGKBtn(label, key)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 1, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(45, 90, 160)
+    btn.Text = label
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamMedium
+    btn.TextSize = 11
+    btn.BorderSizePixel = 0
+    btn.AutoButtonColor = false
+    btn.ZIndex = 103
+    btn.Parent = gkGrid
+
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        fireGK(key)
+    end)
+    return btn
+end
+
+-- ═══════════════════════════════════════════════════════════════════
+-- 🔥 FUNÇÃO GK CORRIGIDA - acha no Character (equipado) primeiro
+-- ═══════════════════════════════════════════════════════════════════
+function fireGK(key)
+    local char = player.Character
+    local fired = false
+    local locations = {}
+    
+    -- 🎯 ORDEM DE PRIORIDADE (a que realmente funciona)
+    if char then
+        table.insert(locations, {name = "Character", obj = char})
+        -- Também procura por "GK" dentro do char
+        local gkInChar = char:FindFirstChild("GK")
+        if gkInChar then
+            table.insert(locations, {name = "Character.GK", obj = gkInChar})
+        end
+    end
+    
+    local bp = player:FindFirstChild("Backpack")
+    if bp then
+        table.insert(locations, {name = "Backpack", obj = bp})
+    end
+    
+    table.insert(locations, {name = "StarterPack", obj = StarterPack})
+    
+    -- Procura o GK em cada lugar
+    for _, loc in ipairs(locations) do
+        if not fired then
+            pcall(function()
+                local gk = loc.obj:FindFirstChild("GK")
+                if gk then
+                    local remote = gk:FindFirstChild(key)
+                    if remote then
+                        if remote:IsA("RemoteEvent") then
+                            remote:FireServer()
+                            fired = true
+                            print("[GK] " .. key .. " FireServer via " .. loc.name)
+                        elseif remote:IsA("RemoteFunction") then
+                            remote:InvokeServer()
+                            fired = true
+                            print("[GK] " .. key .. " InvokeServer via " .. loc.name)
+                        elseif remote:IsA("BindableEvent") then
+                            remote:Fire()
+                            fired = true
+                            print("[GK] " .. key .. " BindableFire via " .. loc.name)
+                        end
+                    end
+                end
+            end)
+        end
+    end
+    
+    -- Se não achou GK, procura a key direto no Character (algumas implementações)
+    if not fired and char then
+        pcall(function()
+            local remote = char:FindFirstChild(key)
+            if remote then
+                if remote:IsA("RemoteEvent") then
+                    remote:FireServer()
+                    fired = true
+                end
+            end
+        end)
+    end
+    
+    if not fired then
+        print("[GK] FALHOU: " .. key .. " - GK não encontrado")
+    end
+    
+    return fired
+end
+
+-- Cria botões GK
+makeGKBtn("↘ Direita Baixo", "C")
+makeGKBtn("↙ Esquerda Baixo", "Z")
+makeGKBtn("↗ Direita Alto", "E")
+makeGKBtn("↖ Esquerda Alto", "Q")
+makeGKBtn("🥅 Avança/Agarra", "H")
+makeGKBtn("🙌 Agarra Alto", "R")
+
+-- ═══════════════════════════════════════════════════════════════════
+-- 🏊 ABA AUTO DIVE
+-- ═══════════════════════════════════════════════════════════════════
+local diveBtn = makeBtn(divePage, "  Auto Dive: DESLIGADO", Color3.fromRGB(200, 50, 50))
+local diveInfo = makeLabel(divePage, "  Detecta a bola e pula no canto certo\n  automaticamente", Color3.fromRGB(150, 150, 160), 36)
+local testBtn = makeBtn(divePage, "  Testar GK (Avança)", Color3.fromRGB(150, 80, 200))
+
+testBtn.MouseButton1Click:Connect(function()
+    fireGK("H")
+end)
+
+-- ═══════════════════════════════════════════════════════════════════
+-- ⚙️ ABA CONFIG
+-- ═══════════════════════════════════════════════════════════════════
+local scanBtn = makeBtn(configPage, "  Modo Scanner: DESLIGADO", Color3.fromRGB(80, 100, 200))
+local infoConfig = makeLabel(configPage, "  Scanner mostra objetos próximos\n  para identificar a bola", Color3.fromRGB(150, 150, 160), 36)
+
+-- ═══ DETECTOR DE BOLA ═══
+local function findBall()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil, 0, "", 0 end
+    
+    local candidates = {}
+    
+    -- TPS.PB
+    local tps = Workspace:FindFirstChild("TPS")
+    if tps then
+        local pb = tps:FindFirstChild("PB")
+        if pb and pb:IsA("BasePart") then
+            table.insert(candidates, {part = pb, source = "TPS.PB"})
+        end
+        for _, v in pairs(tps:GetDescendants()) do
+            if v:IsA("BasePart") then
+                table.insert(candidates, {part = v, source = "TPS." .. v.Name})
+            end
+        end
+    end
+    
+    -- lball / rball
+    for _, v in pairs(Workspace:GetDescendants()) do
+        if v:IsA("BasePart") then
+            local n = string.lower(v.Name)
+            if n == "lball" or n == "rball" or n:find("ball") or n:find("bola") then
+                local isMine = char and v:IsDescendantOf(char)
+                if not isMine then
+                    local jaTem = false
+                    for _, c in ipairs(candidates) do
+                        if c.part == v then jaTem = true break end
+                    end
+                    if not jaTem then
+                        table.insert(candidates, {part = v, source = v.Name})
+                    end
+                end
+            end
+        end
+    end
+    
+    local closest, closestDist, closestSource = nil, math.huge, ""
+    for _, c in ipairs(candidates) do
+        if c.part and c.part.Parent then
+            local d = (c.part.Position - hrp.Position).Magnitude
+            if d < closestDist then
+                closestDist = d
+                closest = c.part
+                closestSource = c.source
+            end
+        end
+    end
+    
+    return closest, closestDist, closestSource, #candidates
+end
+
+-- Scanner
+local function scanNearby()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return "sem player" end
+    
+    local myPos = hrp.Position
+    local list = {}
+    
+    for _, v in pairs(Workspace:GetDescendants()) do
+        if v:IsA("BasePart") then
+            local isMine = v:IsDescendantOf(char)
+            local isOtherPlayer = false
+            for _, plr in pairs(game.Players:GetPlayers()) do
+                if plr ~= player and plr.Character and v:IsDescendantOf(plr.Character) then
+                    isOtherPlayer = true
+                    break
+                end
+            end
+            if not isMine and not isOtherPlayer then
+                table.insert(list, {
+                    name = v.Name,
+                    dist = (v.Position - myPos).Magnitude,
+                    parent = v.Parent and v.Parent.Name or "?"
+                })
+            end
+        end
+    end
+    
+    table.sort(list, function(a, b) return a.dist < b.dist end)
+    
+    local txt = "  TOP 5:\n"
+    for i = 1, math.min(5, #list) do
+        txt = txt .. "  " .. i .. ". " .. list[i].name .. " (" .. math.floor(list[i].dist) .. "m)\n"
+    end
+    return txt
+end
+
+-- Loop
+task.spawn(function()
+    while task.wait(0.4) do
+        if config.scannerMode then
+            ballStatus.Text = scanNearby()
+            ballStatus.TextColor3 = Color3.fromRGB(255, 220, 50)
+        else
+            local ball, dist, source, total = findBall()
+            config.detectedBall = ball
+            if ball then
+                ballStatus.Text = "  🔍 Bola: " .. ball.Name .. " | " .. math.floor(dist) .. "m"
+                ballStatus.TextColor3 = Color3.fromRGB(100, 255, 100)
+            else
+                ballStatus.Text = "  🔍 Bola: não encontrada"
+                ballStatus.TextColor3 = Color3.fromRGB(255, 100, 100)
+            end
+        end
+    end
+end)
+
+scanBtn.MouseButton1Click:Connect(function()
+    config.scannerMode = not config.scannerMode
+    if config.scannerMode then
+        scanBtn.Text = "  Modo Scanner: LIGADO"
+        scanBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 100)
+    else
+        scanBtn.Text = "  Modo Scanner: DESLIGADO"
+        scanBtn.BackgroundColor3 = Color3.fromRGB(80, 100, 200)
+    end
+end)
+
+-- ═══ CÍRCULO ═══
+local circle = nil
+local function createCircle()
+    if circle then circle:Destroy() end
+    circle = Instance.new("Part")
+    circle.Name = "MaritacaCircle"
+    circle.Shape = Enum.PartType.Ball
+    circle.Size = Vector3.new(config.reachSize, config.reachSize, config.reachSize)
+    circle.Anchored = true
+    circle.CanCollide = false
+    circle.Material = Enum.Material.ForceField
+    circle.Color = Color3.fromRGB(0, 255, 100)
+    circle.Transparency = 0.7
+    circle.CastShadow = false
+    circle.Parent = Workspace
+end
+
+-- ═══ REACH ═══
+local reachConn = nil
+local function toggleReach()
+    config.reachEnabled = not config.reachEnabled
+    if config.reachEnabled then
+        reachBtn.Text = "  Reach: LIGADO"
+        reachBtn.BackgroundColor3 = Color3.fromRGB(30, 180, 80)
+        createCircle()
+
+    
