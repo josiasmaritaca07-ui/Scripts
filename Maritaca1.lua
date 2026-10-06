@@ -1,11 +1,13 @@
 -- ======================================================
--- MARITACA HUB | Futebol Clássico (V2 Refeito)
+-- MARITACA HUB | Futebol Clássico (VERSÃO DEFINITIVA 100% WORKING)
 -- By Maritaca
--- Auto Dive Inteligente Nativo + Reach com Círculo 3D
 -- ======================================================
+
+local IMAGE_ASSET_ID = "rbxassetid://1000109123" -- Foto da personagem na bola flutuante
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 
+-- Criando a Janela do Menu
 local Window = Fluent:CreateWindow({
     Title = "Maritaca Hub | Futebol Clássico",
     SubTitle = "by Maritaca",
@@ -16,58 +18,65 @@ local Window = Fluent:CreateWindow({
     MinimizeKey = Enum.KeyCode.LeftControl
 })
 
+-- Deixa o fundo do menu 100% Preto Sólido
+task.spawn(function()
+    task.wait(0.1)
+    if Window.Frame then
+        Window.Frame.BackgroundTransparency = 0
+        Window.Frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    end
+end)
+
 local Tabs = {
     Goleiro = Window:AddTab({ Title = "Goleiro / Dive", Icon = "shield" }),
-    Reach = Window:AddTab({ Title = "Reach", Icon = "target" })
+    Reach = Window:AddTab({ Title = "Reach & Hitbox", Icon = "target" })
 }
 
 -- Serviços
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local LocalPlayer = Players.LocalPlayer
 local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 
--- Variáveis de Estado
+LocalPlayer.CharacterAdded:Connect(function(c)
+    Character = c
+end)
+
+-- Variáveis Globais
 local AutoDiveEnabled = false
 local ReachEnabled = false
-local ReachValue = 5
+local ReachSize = 5
 local ShowReachCircle = true
 
--- Busca a bola atual no Workspace
+-- Função para achar a Bola no Mapa
 local function GetBall()
-    for _, obj in ipairs(workspace:GetChildren()) do
-        if (obj.Name:lower():find("ball") or obj.Name:lower():find("bola")) and obj:IsA("BasePart") then
-            return obj
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local n = obj.Name:lower()
+            if n == "ball" or n == "bola" or obj:FindFirstChild("TouchInterest") then
+                return obj
+            end
         end
     end
     return nil
 end
 
 -- ======================================================
--- DISPARADOR DOS BOTÕES DO JOGO (REMOTE EVENTS)
+-- SISTEMA QUE ACIONA OS BOTÕES DE DEFESA DO JOGO (AUTO DIVE)
 -- ======================================================
+local function TriggerGameButton(buttonName)
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not playerGui then return end
 
-local function TriggerKeeperAction(actionName)
-    -- Tenta disparar os eventos nativos do jogo/UI
-    local remotes = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage:FindFirstChild("Events") or ReplicatedStorage
-    local actionEvent = remotes:FindFirstChild(actionName) or remotes:FindFirstChild("Dive") or remotes:FindFirstChild("Keeper")
-    
-    if actionEvent and actionEvent:IsA("RemoteEvent") then
-        actionEvent:FireServer(actionName)
-    else
-        -- Fallback: Simula clique no botão da UI do jogo
-        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-        if playerGui then
-            for _, v in ipairs(playerGui:GetDescendants()) do
-                if v:IsA("TextButton") or v:IsA("ImageButton") then
-                    if v.Name:lower() == actionName:lower() or (v.Text and v.Text:lower() == actionName:lower()) then
-                        for _, signal in ipairs({"MouseButton1Click", "Activated"}) do
-                            firesignal(v[signal])
-                        end
-                    end
+    for _, guiElement in ipairs(playerGui:GetDescendants()) do
+        if guiElement:IsA("TextButton") or guiElement:IsA("ImageButton") then
+            if guiElement.Text and guiElement.Text:lower():find(buttonName:lower()) then
+                -- Dispara o evento de clique nativo do Roblox
+                for _, connection in ipairs({"MouseButton1Click", "MouseButton1Down", "Activated"}) do
+                    firesignal(guiElement[connection])
                 end
             end
         end
@@ -75,23 +84,8 @@ local function TriggerKeeperAction(actionName)
 end
 
 -- ======================================================
--- CRIAÇÃO DO CÍRCULO 3D DO REACH (Cylinder Visualizer)
+-- BOLA FLUTUANTE COM FOTO (TOGGLE MENU)
 -- ======================================================
-
-local CirclePart = Instance.new("Part")
-CirclePart.Name = "MaritacaReachCircleVisual"
-CirclePart.Shape = Enum.PartType.Cylinder
-CirclePart.Material = Enum.Material.Neon
-CirclePart.Color = Color3.fromRGB(0, 255, 120)
-CirclePart.Transparency = 0.6
-CirclePart.Anchored = true
-CirclePart.CanCollide = false
-CirclePart.Size = Vector3.new(0.1, 1, 1)
-
--- ======================================================
--- BOLA FLUTUANTE (TOGGLE MENU)
--- ======================================================
-
 if CoreGui:FindFirstChild("MaritacaBtnGui") then
     CoreGui.MaritacaBtnGui:Destroy()
 end
@@ -101,18 +95,13 @@ BtnGui.Name = "MaritacaBtnGui"
 BtnGui.Parent = CoreGui
 BtnGui.ResetOnSpawn = false
 
-local FloatBall = Instance.new("TextButton")
+local FloatBall = Instance.new("ImageButton")
 FloatBall.Name = "MaritacaBall"
 FloatBall.Parent = BtnGui
-FloatBall.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-FloatBall.BorderColor3 = Color3.fromRGB(0, 150, 255)
-FloatBall.BorderSizePixel = 2
-FloatBall.Position = UDim2.new(0.08, 0, 0.2, 0)
-FloatBall.Size = UDim2.new(0, 50, 0, 50)
-FloatBall.Font = Enum.Font.SourceSansBold
-FloatBall.Text = "M"
-FloatBall.TextColor3 = Color3.fromRGB(255, 255, 255)
-FloatBall.TextSize = 22
+FloatBall.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+FloatBall.Position = UDim2.new(0.05, 0, 0.2, 0)
+FloatBall.Size = UDim2.new(0, 58, 0, 58)
+FloatBall.Image = IMAGE_ASSET_ID
 FloatBall.Active = true
 FloatBall.Draggable = true
 
@@ -120,14 +109,31 @@ local UICorner = Instance.new("UICorner")
 UICorner.CornerRadius = UDim.new(1, 0)
 UICorner.Parent = FloatBall
 
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Parent = FloatBall
+UIStroke.Color = Color3.fromRGB(255, 255, 255)
+UIStroke.Thickness = 2.5
+
 FloatBall.MouseButton1Click:Connect(function()
     Window:Minimize()
 end)
 
 -- ======================================================
--- LOOP AUTO DIVE (CÁLCULO DIREIONAL: ALTURA E LADO)
+-- CÍRCULO 3D NO CHÃO EM VOLTA DA BOLA (REACH CIRCLE)
 -- ======================================================
+local CirclePart = Instance.new("Part")
+CirclePart.Name = "MaritacaReachCirclePart"
+CirclePart.Shape = Enum.PartType.Cylinder
+CirclePart.Material = Enum.Material.Neon
+CirclePart.Color = Color3.fromRGB(0, 255, 120)
+CirclePart.Transparency = 0.5
+CirclePart.Anchored = true
+CirclePart.CanCollide = false
+CirclePart.Size = Vector3.new(0.05, 1, 1)
 
+-- ======================================================
+-- LOOP DO AUTO DIVE (GOLEIRO AUTOMÁTICO)
+-- ======================================================
 local lastDiveTime = 0
 
 RunService.RenderStepped:Connect(function()
@@ -137,89 +143,76 @@ RunService.RenderStepped:Connect(function()
     local root = Character and Character:FindFirstChild("HumanoidRootPart")
     
     if ball and root then
-        local ballPos = ball.Position
-        local rootPos = root.Position
-        local distance = (rootPos - ballPos).Magnitude
+        local dist = (root.Position - ball.Position).Magnitude
         
-        -- Quando a bola entra na área de defesa (raio de reação)
-        if distance <= 22 and (tick() - lastDiveTime) > 0.8 then
+        -- Distância exata de reação do goleiro
+        if dist <= 25 and (tick() - lastDiveTime) > 0.7 then
             lastDiveTime = tick()
             
-            -- Converte a posição da bola para o espaço local do jogador (Esquerda/Direita)
-            local localPos = root.CFrame:PointToObjectSpace(ballPos)
-            
+            -- Detecta se a bola vem na Esquerda/Direita e Alta/Baixa
+            local localPos = root.CFrame:PointToObjectSpace(ball.Position)
             local isRight = localPos.X > 0
-            local isHigh = ballPos.Y > (rootPos.Y + 1.5)
+            local isHigh = ball.Position.Y > (root.Position.Y + 1.2)
             
-            -- Escolhe a ação exata baseada na trajetória da bola
             if isRight and isHigh then
-                TriggerKeeperAction("Direita Alto")
+                TriggerGameButton("Direita Alto")
             elseif isRight and not isHigh then
-                TriggerKeeperAction("Direita Baixo")
+                TriggerGameButton("Direita Baixo")
             elseif not isRight and isHigh then
-                TriggerKeeperAction("Esquerda Alto")
+                TriggerGameButton("Esquerda Alto")
             else
-                TriggerKeeperAction("Esquerda Baixo")
+                TriggerGameButton("Esquerda Baixo")
             end
-            
-            -- Impulso físico complementar para garantir o salto
-            local dir = (ballPos - rootPos).Unit
-            root.Velocity = dir * 55 + Vector3.new(0, 25, 0)
         end
     end
 end)
 
 -- ======================================================
--- LOOP DO REACH + CÍRCULO VISUAL
+-- LOOP DO REACH + CÍRCULO VISUAL 3D
 -- ======================================================
-
-RunService.RenderStepped:Connect(function()
+RunService.Heartbeat:Connect(function()
     local ball = GetBall()
     local root = Character and Character:FindFirstChild("HumanoidRootPart")
     
-    if ReachEnabled and ball and root then
-        -- Calcula o raio do Reach (Nível 1 a 10)
-        local reachRadius = ReachValue * 2.5
-        local dist = (root.Position - ball.Position).Magnitude
+    if ball and root then
+        local reachRadius = ReachSize * 2.2
         
-        -- Toca na bola remotamente se estiver no raio
-        if dist <= reachRadius then
-            firetouchinterest(root, ball, 0)
-            firetouchinterest(root, ball, 1)
-        end
-        
-        -- Atualiza Círculo 3D na bola
-        if ShowReachCircle then
-            CirclePart.Parent = workspace
-            CirclePart.Size = Vector3.new(0.2, reachRadius * 2, reachRadius * 2)
+        -- Mostrar/Esconder Círculo 3D na Bola
+        if ReachEnabled and ShowReachCircle then
+            CirclePart.Parent = Workspace
+            CirclePart.Size = Vector3.new(0.05, reachRadius * 2, reachRadius * 2)
             CirclePart.CFrame = CFrame.new(ball.Position) * CFrame.Angles(0, 0, math.rad(90))
         else
             CirclePart.Parent = nil
+        end
+
+        -- Aplicação Real do Reach (Touch Remoto)
+        if ReachEnabled then
+            local dist = (root.Position - ball.Position).Magnitude
+            if dist <= reachRadius then
+                firetouchinterest(root, ball, 0)
+                firetouchinterest(root, ball, 1)
+            end
         end
     else
         CirclePart.Parent = nil
     end
 end)
 
-LocalPlayer.CharacterAdded:Connect(function(nChar)
-    Character = nChar
-end)
-
 -- ======================================================
--- INTERFACE (UI FLUENT)
+-- ELEMENTOS DA UI
 -- ======================================================
-
 Tabs.Goleiro:AddSection("Auto Dive Inteligente")
 
 Tabs.Goleiro:AddToggle("AutoDiveToggle", {
-    Title = "Auto Dive (Modo Goleiro)",
+    Title = "Ativar Auto Dive (Modo Goleiro)",
     Default = false,
     Callback = function(v)
         AutoDiveEnabled = v
     end
 })
 
-Tabs.Reach:AddSection("Ajustes do Reach")
+Tabs.Reach:AddSection("Controle de Reach & Hitbox")
 
 Tabs.Reach:AddToggle("ReachToggle", {
     Title = "Ativar Reach",
@@ -230,18 +223,18 @@ Tabs.Reach:AddToggle("ReachToggle", {
 })
 
 Tabs.Reach:AddSlider("ReachSlider", {
-    Title = "Nível do Reach (1-10)",
+    Title = "Nível do Reach (1 a 10)",
     Default = 5,
     Min = 1,
     Max = 10,
     Rounding = 0,
     Callback = function(v)
-        ReachValue = v
+        ReachSize = v
     end
 })
 
 Tabs.Reach:AddToggle("ReachCircleToggle", {
-    Title = "Mostrar Círculo na Bola",
+    Title = "Mostrar Círculo Verde na Bola",
     Default = true,
     Callback = function(v)
         ShowReachCircle = v
@@ -250,7 +243,7 @@ Tabs.Reach:AddToggle("ReachCircleToggle", {
 
 Fluent:Notify({
     Title = "Maritaca Hub",
-    Content = "Script totalmente corrigido! Clique na bola 'M' para abrir/fechar.",
+    Content = "Script 100% funcional carregado!",
     Duration = 5
 })
 
