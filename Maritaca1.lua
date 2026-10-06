@@ -1,545 +1,605 @@
 -- ======================================================
--- MARITACA HUB | Futebol Clássico (V11 - DIVE NATIVO)
--- Usa o RemoteEvent real do jogo para mergulhar
+-- MARITACA HUB | Native Black Edition (V28)
+-- 100% NATIVO - Sem Fluent, sem link externo
+-- By Maritaca
 -- ======================================================
 
-local IMAGE_ASSET_ID = "rbxassetid://1000109123"
+print("[Maritaca] Iniciando V28...")
 
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+-- SERVIÇOS
+local CoreGui      = game:GetService("CoreGui")
+local Players      = game:GetService("Players")
+local RunService   = game:GetService("RunService")
+local Workspace    = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualInput = game:GetService("VirtualInputManager")
+local UserInput    = game:GetService("UserInputService")
 
-local Window = Fluent:CreateWindow({
-    Title = "Maritaca Hub | Futebol Clássico",
-    SubTitle = "by Maritaca",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(580, 440),
-    Acrylic = false,
-    Theme = "Darker",
-    MinimizeKey = Enum.KeyCode.LeftControl
-})
+local LocalPlayer = Players.LocalPlayer
+local Character   = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 
-task.spawn(function()
-    task.wait(0.1)
-    if Window.Frame then
-        Window.Frame.BackgroundTransparency = 0
-        Window.Frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+LocalPlayer.CharacterAdded:Connect(function(c)
+    Character = c
+    task.wait(0.5)
+    if State.SpeedEnabled then
+        local hum = c:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = GetSpeedValue(State.SpeedLevel) end
     end
 end)
 
-local Tabs = {
-    Goleiro = Window:AddTab({ Title = "Goleiro / Dive", Icon = "shield" }),
-    Reach   = Window:AddTab({ Title = "Reach & Hitbox", Icon = "target" }),
-    FPS     = Window:AddTab({ Title = "FPS", Icon = "zap" }),
-    Debug   = Window:AddTab({ Title = "Debug / Info", Icon = "terminal" })
-}
-
--- ======================================================
--- SERVIÇOS
--- ======================================================
-local Players           = game:GetService("Players")
-local RunService        = game:GetService("RunService")
-local CoreGui           = game:GetService("CoreGui")
-local Workspace         = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualInput      = game:GetService("VirtualInputManager")
-local Lighting          = game:GetService("Lighting")
-
-local LocalPlayer = Players.LocalPlayer
-local Camera      = Workspace.CurrentCamera
-
-local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-LocalPlayer.CharacterAdded:Connect(function(c)
-    Character = c
-    task.wait(0.3)
-end)
+print("[Maritaca] Serviços OK")
 
 -- ======================================================
 -- ESTADO
 -- ======================================================
 local State = {
-    AutoDiveEnabled   = false,
-    ReachEnabled      = false,
-    ReachSize         = 5,
-    ShowReachCircle   = true,
-    DebugMode         = false,
-    DiveCooldown      = 0.35,
-    AutoDiveRange     = 40,
-    UseNativeDive     = true,   -- usa o remote nativo do jogo
-    lastDiveTime      = 0,
+    -- Reach
+    ReachEnabled = false,
+    ReachRange = 5,
+    ReachColor = Color3.fromRGB(0, 170, 255),
+    -- Auto Dive
+    AutoDiveEnabled = false,
+    AutoDiveRange = 30,
+    AutoDiveCooldown = 0.35,
+    AutoDiveMinSpeed = 6,
+    UseResetWelds = true,
+    UseGKButtons = true,
+    ForceVelocity = true,
+    DivePowerH = 60,
+    DivePowerV = 30,
+    -- Ball
+    ShowBallMarker = true,
+    TPEnabled = false,
+    TPRange = 15,
+    TPCooldown = 0.5,
+    MagnetEnabled = false,
+    MagnetRange = 20,
+    MagnetForce = 100,
+    -- Speed
+    SpeedEnabled = false,
+    SpeedLevel = 1,
 }
 
 -- ======================================================
--- DETECÇÃO DA BOLA
+-- RESETWELDS
 -- ======================================================
-local BallCache    = nil
-local LastBallScan = 0
-
-local function LooksLikeBall(obj)
-    if not obj or not obj:IsA("BasePart") then return false end
-    local n = obj.Name:lower()
-    if n == "football" or n == "ball" or n == "bola" then return true end
-    if n:find("ball") or n:find("bola") then return true end
-    if obj.Shape == Enum.PartType.Ball and obj.Size.Magnitude < 10 then return true end
-    return false
+local ResetWelds = ReplicatedStorage:FindFirstChild("ResetWelds")
+if not ResetWelds then
+    ResetWelds = ReplicatedStorage:FindFirstChild("ResetWelds", true)
 end
 
-local function ScanForBall()
-    -- Prioridade: nome exato "Football" (usado no The Classic Soccer)
-    local direct = Workspace:FindFirstChild("Football")
-    if direct and direct:IsA("BasePart") then return direct end
+local function FireResetWelds()
+    if not ResetWelds or not ResetWelds:IsA("RemoteEvent") then return false end
+    if not ResetWelds.OnClientEvent then return false end
+    pcall(function()
+        firesignal(ResetWelds.OnClientEvent, LocalPlayer)
+    end)
+    return true
+end
 
-    for _, obj in ipairs(Workspace:GetChildren()) do
-        if LooksLikeBall(obj) then return obj end
-    end
-    for _, folder in ipairs(Workspace:GetChildren()) do
-        if folder:IsA("Folder") or folder:IsA("Model") then
-            for _, obj in ipairs(folder:GetChildren()) do
-                if LooksLikeBall(obj) then return obj end
-            end
-        end
-    end
-    return nil
+-- ======================================================
+-- SPEED
+-- ======================================================
+local SPEED_TABLE = {
+    [1]=16,[2]=24,[3]=32,[4]=42,[5]=55,
+    [6]=70,[7]=88,[8]=105,[9]=125,[10]=150,
+}
+local function GetSpeedValue(l) return SPEED_TABLE[l] or 16 end
+
+-- ======================================================
+-- DETECTOR DE BOLA
+-- ======================================================
+local BallCache = nil
+local LastBallScan = 0
+
+local function IsBall(obj)
+    if not obj or not obj:IsA("BasePart") then return 0 end
+    local n = obj.Name:lower()
+    if n == "football" or n == "ball" or n == "bola" or n == "soccerball" then return 4 end
+    if n:find("ball") or n:find("bola") then return 3 end
+    if obj:IsA("Part") and obj.Shape == Enum.PartType.Ball and obj.Size.Magnitude < 8 then return 2 end
+    return 0
 end
 
 local function GetBall()
-    if BallCache and BallCache.Parent and LooksLikeBall(BallCache) then return BallCache end
-    if tick() - LastBallScan < 0.4 then return BallCache end
+    if BallCache and BallCache.Parent and IsBall(BallCache) > 0 then return BallCache end
+    if tick() - LastBallScan < 0.3 then return BallCache end
     LastBallScan = tick()
-    BallCache = ScanForBall()
+    local best, bestScore = nil, 0
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        local s = IsBall(obj)
+        if s > bestScore then
+            best = obj
+            bestScore = s
+            if s == 4 then break end
+        end
+    end
+    BallCache = best
     return BallCache
 end
 
 -- ======================================================
--- MERGULHO NATIVO (via RemoteEvent do jogo)
+-- GK BUTTONS
 -- ======================================================
-local NativeDiveRemote = nil
+local function FireGKButton(key)
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if not pg then return false end
+    local start = pg:FindFirstChild("Start", true)
+    if not start then return false end
+    local label = start:FindFirstChild("ImageLabel", true)
+    if not label then return false end
+    local btn = label:FindFirstChild("GK " .. key)
+    if not btn then return false end
 
-local function FindNativeDiveRemote()
-    -- Caminho exato do The Classic Soccer: Packages.Knit.Services.BallService.RE.Dive
-    local packages = ReplicatedStorage:FindFirstChild("Packages")
-    if packages then
-        local knit = packages:FindFirstChild("Knit")
-        if knit then
-            local services = knit:FindFirstChild("Services")
-            if services then
-                local ballService = services:FindFirstChild("BallService")
-                if ballService then
-                    local re = ballService:FindFirstChild("RE")
-                    if re then
-                        local dive = re:FindFirstChild("Dive")
-                        if dive and dive:IsA("RemoteEvent") then
-                            return dive
-                        end
-                    end
-                end
-            end
-        end
+    if typeof(firesignal) == "function" then
+        pcall(function() firesignal(btn.MouseButton1Click) end)
+        pcall(function() firesignal(btn.MouseButton1Down) end)
+        pcall(function() firesignal(btn.Activated) end)
     end
-
-    -- Fallback: procura qualquer remote com "Dive" no nome
-    for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
-        if v:IsA("RemoteEvent") and v.Name:lower():find("dive") then
-            return v
+    pcall(function()
+        if btn.AbsolutePosition and btn.AbsoluteSize then
+            local pos = btn.AbsolutePosition + (btn.AbsoluteSize / 2)
+            VirtualInput:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 1)
+            task.wait(0.01)
+            VirtualInput:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 1)
         end
-    end
-    return nil
+    end)
+    return true
 end
 
--- Tenta encontrar o remote ao carregar e depois periodicamente
-NativeDiveRemote = FindNativeDiveRemote()
-task.spawn(function()
-    while not NativeDiveRemote do
-        task.wait(2)
-        NativeDiveRemote = FindNativeDiveRemote()
-        if NativeDiveRemote and State.DebugMode then
-            print("[Maritaca] Remote Dive encontrado:", NativeDiveRemote:GetFullName())
-        end
-    end
-end)
+local function ExecuteDive(isRight, isHigh)
+    local root = Character and Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
 
--- ======================================================
--- TECLAS DE MERGULHO DO JOGO
--- ======================================================
--- Baseado no script original: A+Q (esquerda), D+Q (direita), Space (alto)
-local DIVE_KEYS = {
-    LEFT_LOW  = {Enum.KeyCode.Q, Enum.KeyCode.A},
-    RIGHT_LOW = {Enum.KeyCode.Q, Enum.KeyCode.D},
-    LEFT_HIGH = {Enum.KeyCode.Space, Enum.KeyCode.Q, Enum.KeyCode.A},
-    RIGHT_HIGH= {Enum.KeyCode.Space, Enum.KeyCode.Q, Enum.KeyCode.D},
-    CENTER    = {Enum.KeyCode.Space},
-}
-
-local function PressKeys(keys, duration)
-    for _, key in ipairs(keys) do
-        VirtualInput:SendKeyEvent(true, key, false, game)
-    end
-    task.wait(duration or 0.15)
-    for _, key in ipairs(keys) do
-        VirtualInput:SendKeyEvent(false, key, false, game)
-    end
-end
-
--- ======================================================
--- EXECUTA O MERGULHO NATIVO
--- ======================================================
-local isDiving = false
-
-local function TriggerNativeDive(isRight, isHigh)
-    if isDiving then return end
-    isDiving = true
-
-    -- 1) Dispara o RemoteEvent nativo (ativa o sistema do jogo)
-    if State.UseNativeDive and NativeDiveRemote then
+    if State.ForceVelocity then
+        local dirX = isRight and 1 or -1
+        local dirY = isHigh and 1 or 0.3
         pcall(function()
-            NativeDiveRemote:FireServer()
+            root.AssemblyLinearVelocity = Vector3.new(dirX * State.DivePowerH, State.DivePowerV * dirY, 0)
         end)
     end
 
-    -- 2) Pressiona as teclas correspondentes
-    local keys
-    if isHigh then
-        keys = isRight and DIVE_KEYS.RIGHT_HIGH or DIVE_KEYS.LEFT_HIGH
-    else
-        keys = isRight and DIVE_KEYS.RIGHT_LOW or DIVE_KEYS.LEFT_LOW
+    if State.UseGKButtons then
+        local key
+        if isRight and isHigh then key = "E"
+        elseif isRight and not isHigh then key = "C"
+        elseif not isRight and isHigh then key = "Q"
+        else key = "Z" end
+        FireGKButton(key)
     end
 
-    task.spawn(function()
-        PressKeys(keys, 0.15)
-    end)
-
-    task.delay(State.DiveCooldown, function()
-        isDiving = false
-    end)
+    if State.UseResetWelds then FireResetWelds() end
 end
 
 -- ======================================================
--- BOTÃO FLUTUANTE
+-- CRIAR A GUI
 -- ======================================================
-if CoreGui:FindFirstChild("MaritacaBtnGui") then
-    CoreGui.MaritacaBtnGui:Destroy()
+if CoreGui:FindFirstChild("MaritacaNativeGui") then
+    CoreGui.MaritacaNativeGui:Destroy()
 end
 
-local BtnGui = Instance.new("ScreenGui")
-BtnGui.Name = "MaritacaBtnGui"
-BtnGui.Parent = CoreGui
-BtnGui.ResetOnSpawn = false
-BtnGui.IgnoreGuiInset = true
+local MainGui = Instance.new("ScreenGui")
+MainGui.Name = "MaritacaNativeGui"
+MainGui.ResetOnSpawn = false
+MainGui.IgnoreGuiInset = true
+MainGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
-local FloatBall = Instance.new("ImageButton")
-FloatBall.Name = "MaritacaBall"
-FloatBall.Parent = BtnGui
-FloatBall.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-FloatBall.Position = UDim2.new(0.05, 0, 0.2, 0)
-FloatBall.Size = UDim2.new(0, 58, 0, 58)
-FloatBall.Image = IMAGE_ASSET_ID
-FloatBall.Active = true
-FloatBall.Draggable = true
+local ok, err = pcall(function() MainGui.Parent = CoreGui end)
+if not ok then
+    MainGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+print("[Maritaca] GUI criada")
+
+-- ======================================================
+-- JANELA PRINCIPAL
+-- ======================================================
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Parent = MainGui
+MainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+MainFrame.BorderSizePixel = 0
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -220)
+MainFrame.Size = UDim2.new(0, 320, 0, 440)
+MainFrame.Active = true
+MainFrame.Draggable = true
 
 local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(1, 0)
-UICorner.Parent = FloatBall
+UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.Parent = MainFrame
 
 local UIStroke = Instance.new("UIStroke")
-UIStroke.Parent = FloatBall
-UIStroke.Color = Color3.fromRGB(255, 255, 255)
-UIStroke.Thickness = 2.5
+UIStroke.Color = Color3.fromRGB(35, 35, 35)
+UIStroke.Thickness = 1
+UIStroke.Parent = MainFrame
 
-FloatBall.MouseButton1Click:Connect(function()
-    Window:Minimize()
+-- TOPBAR
+local TopBar = Instance.new("Frame")
+TopBar.Parent = MainFrame
+TopBar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+TopBar.BorderSizePixel = 0
+TopBar.Size = UDim2.new(1, 0, 0, 42)
+TopBar.Position = UDim2.new(0, 0, 0, 0)
+
+local TopBarCorner = Instance.new("UICorner")
+TopBarCorner.CornerRadius = UDim.new(0, 10)
+TopBarCorner.Parent = TopBar
+
+local Title = Instance.new("TextLabel")
+Title.Parent = TopBar
+Title.Size = UDim2.new(1, -80, 1, 0)
+Title.Position = UDim2.new(0, 12, 0, 0)
+Title.Text = "Maritaca Hub"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 16
+Title.Font = Enum.Font.GothamBold
+Title.BackgroundTransparency = 1
+Title.TextXAlignment = Enum.TextXAlignment.Left
+
+local Subtitle = Instance.new("TextLabel")
+Subtitle.Parent = TopBar
+Subtitle.Size = UDim2.new(1, -80, 0, 14)
+Subtitle.Position = UDim2.new(0, 12, 1, -16)
+Subtitle.Text = "Black Edition"
+Subtitle.TextColor3 = Color3.fromRGB(0, 170, 255)
+Subtitle.TextSize = 10
+Subtitle.Font = Enum.Font.Gotham
+Subtitle.BackgroundTransparency = 1
+Subtitle.TextXAlignment = Enum.TextXAlignment.Left
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Parent = TopBar
+CloseBtn.Size = UDim2.new(0, 28, 0, 28)
+CloseBtn.Position = UDim2.new(1, -38, 0.5, -14)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+CloseBtn.Text = "×"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 22
+CloseBtn.BorderSizePixel = 0
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(1, 0)
+CloseCorner.Parent = CloseBtn
+
+local CloseStroke = Instance.new("UIStroke")
+CloseStroke.Color = Color3.fromRGB(60, 60, 60)
+CloseStroke.Thickness = 1
+CloseStroke.Parent = CloseBtn
+
+CloseBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
 end)
 
--- ======================================================
--- ESFERA VISUAL DO REACH
--- ======================================================
-local SphereVisual = Instance.new("Part")
-SphereVisual.Name = "MaritacaSphereVisual"
-SphereVisual.Shape = Enum.PartType.Ball
-SphereVisual.Material = Enum.Material.ForceField
-SphereVisual.Color = Color3.fromRGB(0, 255, 120)
-SphereVisual.Transparency = 0.5
-SphereVisual.CanCollide = false
-SphereVisual.CanQuery = false
-SphereVisual.CanTouch = false
-SphereVisual.Anchored = true
-SphereVisual.Parent = nil
+-- DIVISÓRIA
+local Divider = Instance.new("Frame")
+Divider.Parent = MainFrame
+Divider.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+Divider.BorderSizePixel = 0
+Divider.Size = UDim2.new(1, 0, 0, 1)
+Divider.Position = UDim2.new(0, 0, 0, 42)
 
 -- ======================================================
--- LOOP AUTO DIVE (COM PREVISÃO DE TRAJETÓRIA)
+-- ABAS (BOTÕES NO TOPO)
 -- ======================================================
-RunService.Heartbeat:Connect(function()
-    if not State.AutoDiveEnabled then return end
+local TabBar = Instance.new("Frame")
+TabBar.Parent = MainFrame
+TabBar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+TabBar.BorderSizePixel = 0
+TabBar.Size = UDim2.new(1, 0, 0, 32)
+TabBar.Position = UDim2.new(0, 0, 0, 43)
 
-    local ball = GetBall()
-    local char = Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    local hum  = char and char:FindFirstChildOfClass("Humanoid")
-    if not (ball and root and hum and hum.Health > 0) then return end
+local TabBarList = Instance.new("UIListLayout")
+TabBarList.FillDirection = Enum.FillDirection.Horizontal
+TabBarList.SortOrder = Enum.SortOrder.LayoutOrder
+TabBarList.Padding = UDim.new(0, 2)
+TabBarList.Parent = TabBar
 
-    local vel = ball.AssemblyLinearVelocity
-    local speed = vel.Magnitude
+local TabBarPad = Instance.new("UIPadding")
+TabBarPad.PaddingLeft = UDim.new(0, 6)
+TabBarPad.PaddingTop = UDim.new(0, 4)
+TabBarPad.Parent = TabBar
 
-    -- Previsão da posição da bola (como no script original)
-    local predictScale = (speed > 10) and 0.25 or 0.05
-    local targetPos = ball.Position + (vel * predictScale)
+-- CONTAINER DOS CONTEÚDOS
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Parent = MainFrame
+ContentFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+ContentFrame.BorderSizePixel = 0
+ContentFrame.Position = UDim2.new(0, 0, 0, 76)
+ContentFrame.Size = UDim2.new(1, 0, 1, -76)
 
-    local rel = root.CFrame:PointToObjectSpace(targetPos)
-    local dist = (root.Position - ball.Position).Magnitude
+local Pages = {}
+local TabButtons = {}
 
-    -- Verifica se a bola está na zona de defesa
-    if math.abs(rel.Z) > 12 then return end  -- bola muito longe em profundidade
+local function CreatePage(name)
+    local page = Instance.new("ScrollingFrame")
+    page.Name = name .. "Page"
+    page.Parent = ContentFrame
+    page.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    page.BorderSizePixel = 0
+    page.Size = UDim2.new(1, 0, 1, 0)
+    page.Position = UDim2.new(0, 0, 0, 0)
+    page.CanvasSize = UDim2.new(0, 0, 0, 0)
+    page.ScrollBarThickness = 3
+    page.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 60)
+    page.Visible = false
 
-    local threshold = (speed > 25) and 2.5 or 1.5
-    local isHigh = (targetPos.Y - root.Position.Y) > 3.5
+    local pad = Instance.new("UIPadding")
+    pad.PaddingTop = UDim.new(0, 8)
+    pad.PaddingBottom = UDim.new(0, 8)
+    pad.PaddingLeft = UDim.new(0, 10)
+    pad.PaddingRight = UDim.new(0, 10)
+    pad.Parent = page
 
-    if dist <= State.AutoDiveRange and (tick() - State.lastDiveTime) > State.DiveCooldown then
-        if rel.X < -threshold then
-            State.lastDiveTime = tick()
-            TriggerNativeDive(false, isHigh)  -- esquerda
-            if State.DebugMode then print("[Maritaca] DIVE ESQUERDA alto=", isHigh) end
-        elseif rel.X > threshold then
-            State.lastDiveTime = tick()
-            TriggerNativeDive(true, isHigh)   -- direita
-            if State.DebugMode then print("[Maritaca] DIVE DIREITA alto=", isHigh) end
-        elseif math.abs(rel.X) <= threshold and isHigh then
-            State.lastDiveTime = tick()
-            TriggerNativeDive(true, false)    -- centro (pulo)
-            if State.DebugMode then print("[Maritaca] DIVE CENTRO") end
+    local list = Instance.new("UIListLayout")
+    list.SortOrder = Enum.SortOrder.LayoutOrder
+    list.Padding = UDim.new(0, 6)
+    list.Parent = page
+
+    list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        page.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y + 20)
+    end)
+
+    Pages[name] = page
+    return page
+end
+
+local function CreateTabButton(name)
+    local btn = Instance.new("TextButton")
+    btn.Parent = TabBar
+    btn.Size = UDim2.new(0, 65, 0, 24)
+    btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    btn.BorderSizePixel = 0
+    btn.Text = name
+    btn.TextColor3 = Color3.fromRGB(150, 150, 150)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 11
+
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 5)
+    c.Parent = btn
+
+    local s = Instance.new("UIStroke")
+    s.Color = Color3.fromRGB(40, 40, 40)
+    s.Thickness = 1
+    s.Parent = btn
+
+    TabButtons[name] = { btn = btn, stroke = s }
+
+    btn.MouseButton1Click:Connect(function()
+        for n, page in pairs(Pages) do
+            page.Visible = (n == name)
         end
-    end
-end)
-
--- ======================================================
--- LOOP REACH
--- ======================================================
-RunService.Heartbeat:Connect(function()
-    local ball = GetBall()
-    local root = Character and Character:FindFirstChild("HumanoidRootPart")
-
-    if ball and root then
-        local reachRadius = State.ReachSize * 2.5
-
-        if State.ReachEnabled and State.ShowReachCircle then
-            if SphereVisual.Parent ~= Workspace then SphereVisual.Parent = Workspace end
-            local s = reachRadius * 2
-            SphereVisual.Size = Vector3.new(s, s, s)
-            SphereVisual.CFrame = ball.CFrame
-        elseif SphereVisual.Parent then
-            SphereVisual.Parent = nil
-        end
-
-        if State.ReachEnabled then
-            local dist = (root.Position - ball.Position).Magnitude
-            if dist <= reachRadius then
-                for _, part in ipairs(Character:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                        pcall(function()
-                            firetouchinterest(part, ball, 0)
-                            firetouchinterest(part, ball, 1)
-                        end)
-                    end
-                end
+        for n, data in pairs(TabButtons) do
+            if n == name then
+                data.btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                data.stroke.Color = Color3.fromRGB(0, 170, 255)
+            else
+                data.btn.TextColor3 = Color3.fromRGB(150, 150, 150)
+                data.stroke.Color = Color3.fromRGB(40, 40, 40)
             end
         end
-    elseif SphereVisual.Parent then
-        SphereVisual.Parent = nil
-    end
-end)
+    end)
+
+    return btn
+end
 
 -- ======================================================
--- ANTI LAG
+-- ELEMENTOS DE UI
 -- ======================================================
-local AntiLagActive = false
-local OriginalProps = {}
-local AntiLagConn
+local function CreateSection(parent, text)
+    local lbl = Instance.new("TextLabel")
+    lbl.Parent = parent
+    lbl.Size = UDim2.new(1, 0, 0, 22)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = Color3.fromRGB(0, 170, 255)
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 12
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+end
 
-local function ApplyAntiLag()
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj.TextureID and obj.TextureID ~= "" then
-            OriginalProps[obj] = {key = "TextureID", value = obj.TextureID}
-            pcall(function() obj.TextureID = "" end)
-        elseif obj:IsA("Decal") or obj:IsA("Texture") then
-            if obj.Texture and obj.Texture ~= "" then
-                OriginalProps[obj] = {key = "Texture", value = obj.Texture}
-                pcall(function() obj.Texture = "" end)
-            end
-        elseif obj:IsA("SurfaceAppearance") then
-            OriginalProps[obj] = {ColorMap = obj.ColorMap, NormalMap = obj.NormalMap}
-            pcall(function()
-                obj.ColorMap = ""
-                obj.NormalMap = ""
-            end)
-        elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam")
-            or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-            pcall(function() obj.Enabled = false end)
-        end
-    end
+local function CreateToggle(parent, text, default, callback)
+    local btn = Instance.new("TextButton")
+    btn.Parent = parent
+    btn.Size = UDim2.new(1, 0, 0, 34)
+    btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    btn.BorderSizePixel = 0
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 13
+    btn.TextXAlignment = Enum.TextXAlignment.Left
 
-    pcall(function()
-        Workspace.Terrain.Decoration = false
-        Lighting.GlobalShadows = false
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = btn
+
+    local s = Instance.new("UIStroke")
+    s.Color = Color3.fromRGB(35, 35, 35)
+    s.Thickness = 1
+    s.Parent = btn
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 12)
+    pad.Parent = btn
+
+    local ind = Instance.new("Frame")
+    ind.Parent = btn
+    ind.Size = UDim2.new(0, 12, 0, 12)
+    ind.Position = UDim2.new(1, -24, 0.5, -6)
+    ind.BackgroundColor3 = default and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(60, 60, 60)
+    ind.BorderSizePixel = 0
+
+    local indC = Instance.new("UICorner")
+    indC.CornerRadius = UDim.new(1, 0)
+    indC.Parent = ind
+
+    local state = default
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        ind.BackgroundColor3 = state and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(60, 60, 60)
+        callback(state)
     end)
 end
 
-local function RestoreAntiLag()
-    for obj, data in pairs(OriginalProps) do
-        if obj and obj.Parent then
-            pcall(function()
-                if data.key then obj[data.key] = data.value
-                else obj.ColorMap = data.ColorMap obj.NormalMap = data.NormalMap end
-            end)
-        end
-    end
-    OriginalProps = {}
-    pcall(function()
-        Workspace.Terrain.Decoration = true
-        Lighting.GlobalShadows = true
-    end)
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
-            pcall(function() obj.Enabled = true end)
-        end
-    end
-end
+local function CreateButton(parent, text, callback)
+    local btn = Instance.new("TextButton")
+    btn.Parent = parent
+    btn.Size = UDim2.new(1, 0, 0, 34)
+    btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    btn.BorderSizePixel = 0
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 13
 
-local function StartAntiLagWatcher()
-    if AntiLagConn then AntiLagConn:Disconnect() end
-    AntiLagConn = Workspace.DescendantAdded:Connect(function(obj)
-        if not AntiLagActive then return end
-        task.defer(function()
-            if obj:IsA("Decal") or obj:IsA("Texture") then
-                pcall(function() obj.Texture = "" end)
-            elseif obj:IsA("BasePart") and obj.TextureID and obj.TextureID ~= "" then
-                pcall(function() obj.TextureID = "" end)
-            elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
-                pcall(function() obj.Enabled = false end)
-            end
-        end)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = btn
+
+    local s = Instance.new("UIStroke")
+    s.Color = Color3.fromRGB(35, 35, 35)
+    s.Thickness = 1
+    s.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        callback()
     end)
 end
 
-local function SetAntiLag(enabled)
-    AntiLagActive = enabled
-    if enabled then
-        ApplyAntiLag()
-        StartAntiLagWatcher()
-    else
-        RestoreAntiLag()
-        if AntiLagConn then AntiLagConn:Disconnect() AntiLagConn = nil end
+local function CreateSlider(parent, text, min, max, default, callback)
+    local frame = Instance.new("Frame")
+    frame.Parent = parent
+    frame.Size = UDim2.new(1, 0, 0, 48)
+    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    frame.BorderSizePixel = 0
+
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = frame
+
+    local s = Instance.new("UIStroke")
+    s.Color = Color3.fromRGB(35, 35, 35)
+    s.Thickness = 1
+    s.Parent = frame
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Parent = frame
+    lbl.Size = UDim2.new(1, -20, 0, 20)
+    lbl.Position = UDim2.new(0, 12, 0, 6)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text .. ": " .. default
+    lbl.TextColor3 = Color3.fromRGB(220, 220, 220)
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 12
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    local barBg = Instance.new("Frame")
+    barBg.Parent = frame
+    barBg.Size = UDim2.new(1, -24, 0, 6)
+    barBg.Position = UDim2.new(0, 12, 0, 32)
+    barBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    barBg.BorderSizePixel = 0
+
+    local bc = Instance.new("UICorner")
+    bc.CornerRadius = UDim.new(1, 0)
+    bc.Parent = barBg
+
+    local barFill = Instance.new("Frame")
+    barFill.Parent = barBg
+    barFill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    barFill.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    barFill.BorderSizePixel = 0
+
+    local fc = Instance.new("UICorner")
+    fc.CornerRadius = UDim.new(1, 0)
+    fc.Parent = barFill
+
+    local clicker = Instance.new("TextButton")
+    clicker.Parent = frame
+    clicker.Size = UDim2.new(1, -24, 0, 30)
+    clicker.Position = UDim2.new(0, 12, 0, 18)
+    clicker.BackgroundTransparency = 1
+    clicker.Text = ""
+
+    local dragging = false
+
+    local function update(x)
+        local rel = math.clamp((x - barBg.AbsolutePosition.X) / barBg.AbsoluteSize.X, 0, 1)
+        local v = math.floor(min + (max - min) * rel)
+        barFill.Size = UDim2.new(rel, 0, 1, 0)
+        lbl.Text = text .. ": " .. v
+        callback(v)
     end
+
+    clicker.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+           or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            update(input.Position.X)
+        end
+    end)
+    clicker.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+           or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    clicker.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+                         or input.UserInputType == Enum.UserInputType.Touch) then
+            update(input.Position.X)
+        end
+    end)
 end
 
--- ======================================================
--- UI - GOLEIRO
--- ======================================================
-Tabs.Goleiro:AddSection("Auto Dive (Mergulho Nativo do Jogo)")
-
-Tabs.Goleiro:AddToggle("AutoDiveToggle", {
-    Title = "Ativar Auto Dive",
-    Default = false,
-    Callback = function(v) State.AutoDiveEnabled = v end
-})
-
-Tabs.Goleiro:AddToggle("NativeDiveToggle", {
-    Title = "Usar RemoteEvent nativo (recomendado)",
-    Description = "Se desativado, usa apenas as teclas.",
-    Default = true,
-    Callback = function(v) State.UseNativeDive = v end
-})
-
-Tabs.Goleiro:AddSlider("DiveRangeSlider", {
-    Title = "Distância para mergulhar (studs)",
-    Default = 40, Min = 10, Max = 100, Rounding = 0,
-    Callback = function(v) State.AutoDiveRange = v end
-})
-
-Tabs.Goleiro:AddSlider("DiveCooldownSlider", {
-    Title = "Cooldown entre mergulhos (s)",
-    Default = 0.35, Min = 0.15, Max = 1.00, Rounding = 2,
-    Callback = function(v) State.DiveCooldown = v end
-})
+print("[Maritaca] Funções de UI OK")
 
 -- ======================================================
--- UI - REACH
+-- CRIA AS PÁGINAS
 -- ======================================================
-Tabs.Reach:AddSection("Ajustes de Reach e Hitbox")
+CreatePage("Reach")
+CreatePage("Auto Dive")
+CreatePage("Speed")
+CreatePage("Bola")
+CreatePage("Config")
 
-Tabs.Reach:AddToggle("ReachToggle", {
-    Title = "Ativar Reach",
-    Default = false,
-    Callback = function(v) State.ReachEnabled = v end
-})
-
-Tabs.Reach:AddSlider("ReachSlider", {
-    Title = "Tamanho do Reach (Alcance)",
-    Default = 5, Min = 1, Max = 15, Rounding = 0,
-    Callback = function(v) State.ReachSize = v end
-})
-
-Tabs.Reach:AddToggle("ReachCircleToggle", {
-    Title = "Mostrar Círculo Verde na Bola",
-    Default = true,
-    Callback = function(v) State.ShowReachCircle = v end
-})
+CreateTabButton("Reach")
+CreateTabButton("Auto Dive")
+CreateTabButton("Speed")
+CreateTabButton("Bola")
+CreateTabButton("Config")
 
 -- ======================================================
--- UI - FPS
+-- POPULA REACH
 -- ======================================================
-Tabs.FPS:AddSection("Desempenho")
-
-Tabs.FPS:AddToggle("AntiLagToggle", {
-    Title = "Anti Lag (Remove Texturas)",
-    Description = "Remove texturas e efeitos para deixar o jogo mais leve.",
-    Default = false,
-    Callback = function(v)
-        SetAntiLag(v)
-        Fluent:Notify({
-            Title = "Maritaca FPS",
-            Content = v and "Anti Lag ATIVADO!" or "Texturas restauradas.",
-            Duration = 4
-        })
-    end
-})
+CreateSection(Pages.Reach, "Reach Configuration")
+CreateToggle(Pages.Reach, "Enable Reach", false, function(v) State.ReachEnabled = v end)
+CreateSlider(Pages.Reach, "Reach Range", 1, 15, 5, function(v) State.ReachRange = v end)
 
 -- ======================================================
--- UI - DEBUG
+-- POPULA AUTO DIVE
 -- ======================================================
-Tabs.Debug:AddSection("Debug / Diagnóstico")
+CreateSection(Pages["Auto Dive"], "Auto Dive")
+CreateToggle(Pages["Auto Dive"], "Enable Auto Dive", false, function(v) State.AutoDiveEnabled = v end)
+CreateSlider(Pages["Auto Dive"], "Distancia", 10, 80, 30, function(v) State.AutoDiveRange = v end)
+CreateSlider(Pages["Auto Dive"], "Cooldown (x0.1)", 2, 20, 4, function(v) State.AutoDiveCooldown = v/10 end)
+CreateToggle(Pages["Auto Dive"], "Usar ResetWelds", true, function(v) State.UseResetWelds = v end)
+CreateToggle(Pages["Auto Dive"], "Usar botoes GK", true, function(v) State.UseGKButtons = v end)
+CreateToggle(Pages["Auto Dive"], "Impulso fisico", true, function(v) State.ForceVelocity = v end)
+CreateToggle(Pages["Auto Dive"], "Marcador na bola", true, function(v) State.ShowBallMarker = v end)
 
-Tabs.Debug:AddToggle("DebugToggle", {
-    Title = "Modo Debug",
-    Default = false,
-    Callback = function(v) State.DebugMode = v end
-})
-
-Tabs.Debug:AddButton({
-    Title = "Testar Remote Dive",
-    Description = "Dispara o RemoteEvent de dive nativo.",
-    Callback = function()
-        if NativeDiveRemote then
-            NativeDiveRemote:FireServer()
-            Fluent:Notify({Title = "Maritaca", Content = "Remote Dive disparado!", Duration = 3})
-        else
-            Fluent:Notify({Title = "Maritaca", Content = "Remote Dive NÃO encontrado.", Duration = 3})
-        end
-    end
-})
-
-Tabs.Debug:AddButton({
-    Title = "Forçar Dive Esquerda (teste)",
-    Callback = function() TriggerNativeDive(false, false) end
-})
-
-Tabs.Debug:AddButton({
-    Title = "Forçar Dive Direita (teste)",
-    Callback = function() TriggerNativeDive(true, false) end
-})
+CreateSection(Pages["Auto Dive"], "Teste GK")
+CreateButton(Pages["Auto Dive"], "Testar ResetWelds", function() FireResetWelds() end)
+CreateButton(Pages["Auto Dive"], "GK Z (Esq Baixo)", function() ExecuteDive(false, false) end)
+CreateButton(Pages["Auto Dive"], "GK C (Dir Baixo)", function() ExecuteDive(true, false) end)
+CreateButton(Pages["Auto Dive"], "GK Q (Esq Alto)",  function() ExecuteDive(false, true) end)
+CreateButton(Pages["Auto Dive"], "GK E (Dir Alto)",  function() ExecuteDive(true, true) end)
 
 -- ======================================================
--- INICIALIZAÇÃO
+-- POPULA SPEED
 -- ======================================================
-Fluent:Notify({
-    Title = "Maritaca Hub V11",
-    Content = "Mergulho NATIVO carregado! Remote: " .. (NativeDiveRemote and "OK" or "buscando..."),
-    Duration = 6
-})
-
-Window:SelectTab(1)
+CreateSection(Pages.Speed, "Sistema de Velocidade")
+CreateToggle(Pages.Speed, "Enable Speed", false, function(v)
+    State.SpeedEnabl
