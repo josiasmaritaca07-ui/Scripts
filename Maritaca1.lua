@@ -1,7 +1,7 @@
 -- ======================================================
 -- MARITACA HUB - Futebol Clássico
 -- By Maritaca
--- Tema: Escuro (Preto)
+-- Tema: Escuro (Preto) + Botão Flutuante (Toggle UI)
 -- ======================================================
 
 -- Carregando a Biblioteca de UI (Fluent Library)
@@ -27,22 +27,70 @@ local Tabs = {
 
 -- Variáveis Globais de Controle
 local AutoDiveEnabled = false
-local DiveDistance = 15 -- Distância mínima para detectar a bola
+local DiveDistance = 15
 local Player = game.Players.LocalPlayer
 local Character = Player.Character or Player.CharacterAdded:Wait()
+
+-- ======================================================
+-- CRIAÇÃO DA BOLA/BOTÃO FLUTUANTE PARA MINIMIZAR/ABRIR
+-- ======================================================
+
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+
+-- Remove botão antigo se já existir
+if CoreGui:FindFirstChild("MaritacaToggleGui") then
+    CoreGui.MaritacaToggleGui:Destroy()
+end
+
+local ToggleGui = Instance.new("ScreenGui")
+ToggleGui.Name = "MaritacaToggleGui"
+ToggleGui.Parent = CoreGui
+ToggleGui.ResetOnSpawn = false
+
+local FloatButton = Instance.new("TextButton")
+FloatButton.Name = "MaritacaBall"
+FloatButton.Parent = ToggleGui
+FloatButton.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+FloatButton.BorderColor3 = Color3.fromRGB(0, 150, 255)
+FloatButton.BorderSizePixel = 2
+FloatButton.Position = UDim2.new(0.05, 0, 0.2, 0)
+FloatButton.Size = UDim2.new(0, 50, 0, 50)
+FloatButton.Font = Enum.Font.SourceSansBold
+FloatButton.Text = "M"
+FloatButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+FloatButton.TextSize = 22
+FloatButton.Active = true
+FloatButton.Draggable = true -- Permite arrastar a bola pela tela
+
+-- Deixa o botão redondo (Formato de Bola/Logo)
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(1, 0)
+UICorner.Parent = FloatButton
+
+-- Efeito de brilho/sombra
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Parent = FloatButton
+UIStroke.Color = Color3.fromRGB(0, 150, 255)
+UIStroke.Thickness = 2
+
+-- Função de alternar a visibilidade da janela ao clicar na bola
+local isVisible = true
+FloatButton.MouseButton1Click:Connect(function()
+    isVisible = not isVisible
+    Window:Minimize() -- Alterna visibilidade da janela
+end)
 
 -- ======================================================
 -- LÓGICA DO AUTO DIVE (GOLEIRO AUTOMÁTICO SEM DELAY)
 -- ======================================================
 
 local function GetBall()
-    -- Busca o objeto da bola na Workspace
     return workspace:FindFirstChild("Ball") or workspace:FindFirstChild("Bola") or workspace:FindFirstChildOfClass("Part")
 end
 
--- Thread de Detecção e Pulo na Bola
 task.spawn(function()
-    while task.wait(0.01) do -- Rodando em alta frequência (sem delay)
+    while task.wait(0.01) do
         if AutoDiveEnabled then
             local root = Character and Character:FindFirstChild("HumanoidRootPart")
             local humanoid = Character and Character:FindFirstChild("Humanoid")
@@ -51,18 +99,10 @@ task.spawn(function()
             if root and humanoid and ball then
                 local distance = (root.Position - ball.Position).Magnitude
 
-                -- Se a bola estiver dentro do alcance de defesa/pulo
                 if distance <= DiveDistance then
-                    -- Direção em direção à bola
                     local direction = (ball.Position - root.Position).Unit
-                    
-                    -- Aplica o impulso/pulo automático na direção da bola
                     root.Velocity = direction * 50 + Vector3.new(0, 25, 0)
-                    
-                    -- Ativa a animação/estado de pulo/carrinho se necessário
                     humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-                    
-                    -- Aguarda a bola se afastar um pouco para evitar pulos repetidos sem parar
                     task.wait(0.5)
                 end
             end
@@ -70,7 +110,6 @@ task.spawn(function()
     end
 end)
 
--- Atualiza o personagem quando renascer (Reset/Morte)
 Player.CharacterAdded:Connect(function(newChar)
     Character = newChar
 end)
@@ -81,8 +120,7 @@ end)
 
 Tabs.Goleiro:AddSection("Funções de Goleiro")
 
--- Alternador (Toggle) do Auto Dive
-local DiveToggle = Tabs.Goleiro:AddToggle("AutoDiveToggle", {
+Tabs.Goleiro:AddToggle("AutoDiveToggle", {
     Title = "Auto Dive (Defesa Automática)",
     Default = false,
     Callback = function(Value)
@@ -90,14 +128,13 @@ local DiveToggle = Tabs.Goleiro:AddToggle("AutoDiveToggle", {
         if Value then
             Fluent:Notify({
                 Title = "Maritaca Hub",
-                Content = "Auto Dive Ativado! Mantenha-se perto do gol.",
+                Content = "Auto Dive Ativado!",
                 Duration = 3
             })
         end
     end
 })
 
--- Slider de Ajuste de Distância
 Tabs.Goleiro:AddSlider("DiveDistanceSlider", {
     Title = "Distância de Reação (Metros)",
     Default = 15,
@@ -112,9 +149,8 @@ Tabs.Goleiro:AddSlider("DiveDistanceSlider", {
 -- Notificação Inicial
 Fluent:Notify({
     Title = "Maritaca Hub",
-    Content = "Iniciado com sucesso! Desenvolvido por Maritaca.",
+    Content = "Carregado! Clique no botão 'M' para abrir/fechar o menu.",
     Duration = 5
 })
 
--- Seleciona a Aba Principal por Padrão
 Window:SelectTab(1)
