@@ -1,6 +1,6 @@
 -- ======================================================
--- MARITACA HUB | Futebol Clássico (V10 - TRIPLE DIVE)
--- By Maritaca | Auto Dive + Anti Lag
+-- MARITACA HUB | Futebol Clássico (V11 - DIVE NATIVO)
+-- Usa o RemoteEvent real do jogo para mergulhar
 -- ======================================================
 
 local IMAGE_ASSET_ID = "rbxassetid://1000109123"
@@ -42,7 +42,6 @@ local Workspace         = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualInput      = game:GetService("VirtualInputManager")
 local Lighting          = game:GetService("Lighting")
-local UserInput         = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera      = Workspace.CurrentCamera
@@ -62,16 +61,14 @@ local State = {
     ReachSize         = 5,
     ShowReachCircle   = true,
     DebugMode         = false,
-    DiveCooldown      = 0.25,
+    DiveCooldown      = 0.35,
     AutoDiveRange     = 40,
-    ForceVelocity     = true,
-    SmartDive         = true,
+    UseNativeDive     = true,   -- usa o remote nativo do jogo
     lastDiveTime      = 0,
-    lastDiveDir       = nil,
 }
 
 -- ======================================================
--- DETECÇÃO DE BOLA
+-- DETECÇÃO DA BOLA
 -- ======================================================
 local BallCache    = nil
 local LastBallScan = 0
@@ -79,13 +76,17 @@ local LastBallScan = 0
 local function LooksLikeBall(obj)
     if not obj or not obj:IsA("BasePart") then return false end
     local n = obj.Name:lower()
-    if n == "ball" or n == "bola" or n == "football" or n == "soccerball" then return true end
+    if n == "football" or n == "ball" or n == "bola" then return true end
     if n:find("ball") or n:find("bola") then return true end
     if obj.Shape == Enum.PartType.Ball and obj.Size.Magnitude < 10 then return true end
     return false
 end
 
 local function ScanForBall()
+    -- Prioridade: nome exato "Football" (usado no The Classic Soccer)
+    local direct = Workspace:FindFirstChild("Football")
+    if direct and direct:IsA("BasePart") then return direct end
+
     for _, obj in ipairs(Workspace:GetChildren()) do
         if LooksLikeBall(obj) then return obj end
     end
@@ -108,79 +109,106 @@ local function GetBall()
 end
 
 -- ======================================================
--- MERGULHO EM 3 CAMADAS (TRIPLE DIVE)
+-- MERGULHO NATIVO (via RemoteEvent do jogo)
 -- ======================================================
--- Camada 1: Humanoid ChangeState (pular)
--- Camada 2: Clique sintético na direção da bola (alguns jogos aceitam)
--- Camada 3: Impulso físico + CFrame (fallback garantido)
--- ======================================================
+local NativeDiveRemote = nil
 
-local function Layer1_Jump(high)
-    local hum = Character and Character:FindFirstChildOfClass("Humanoid")
-    if not hum then return false end
-    pcall(function()
-        hum:ChangeState(Enum.HumanoidStateType.Jumping)
-    end)
-    return true
-end
-
-local function Layer2_TouchInput(ballPos, isRight)
-    -- Simula toque na direção onde a bola está
-    local ok = false
-    pcall(function()
-        local vp = Camera.ViewportSize
-        -- Posição do lado correspondente (esquerda/direita no terço inferior da tela)
-        local screenX = isRight and (vp.X * 0.85) or (vp.X * 0.15)
-        local screenY = vp.Y * 0.75
-
-        VirtualInput:SendMouseButtonEvent(screenX, screenY, 0, true,  game, 1)
-        task.wait(0.03)
-        VirtualInput:SendMouseButtonEvent(screenX, screenY, 0, false, game, 1)
-
-        -- Também tenta touch
-        VirtualInput:SendTouchEvent(Enum.UserInputType.Touch, 0, screenX, screenY)
-        ok = true
-    end)
-    return ok
-end
-
-local function Layer3_Physics(ballPos, isRight, high)
-    local root = Character and Character:FindFirstChild("HumanoidRootPart")
-    if not root then return false end
-
-    local flat = Vector3.new(ballPos.X - root.Position.X, 0, ballPos.Z - root.Position.Z)
-    local dir
-    if flat.Magnitude < 0.5 then
-        dir = isRight and Vector3.new(1, 0, 0) or Vector3.new(-1, 0, 0)
-    else
-        dir = flat.Unit
+local function FindNativeDiveRemote()
+    -- Caminho exato do The Classic Soccer: Packages.Knit.Services.BallService.RE.Dive
+    local packages = ReplicatedStorage:FindFirstChild("Packages")
+    if packages then
+        local knit = packages:FindFirstChild("Knit")
+        if knit then
+            local services = knit:FindFirstChild("Services")
+            if services then
+                local ballService = services:FindFirstChild("BallService")
+                if ballService then
+                    local re = ballService:FindFirstChild("RE")
+                    if re then
+                        local dive = re:FindFirstChild("Dive")
+                        if dive and dive:IsA("RemoteEvent") then
+                            return dive
+                        end
+                    end
+                end
+            end
+        end
     end
 
-    -- Impulso horizontal forte + vertical pra "voar" na direção da bola
-    local horizForce = 55
-    local vertForce  = high and 38 or 22
+    -- Fallback: procura qualquer remote com "Dive" no nome
+    for _, v in ipairs(ReplicatedStorage:GetDescendants()) do
+        if v:IsA("RemoteEvent") and v.Name:lower():find("dive") then
+            return v
+        end
+    end
+    return nil
+end
 
-    -- Aplica velocity
-    root.AssemblyLinearVelocity = dir * horizForce + Vector3.new(0, vertForce, 0)
+-- Tenta encontrar o remote ao carregar e depois periodicamente
+NativeDiveRemote = FindNativeDiveRemote()
+task.spawn(function()
+    while not NativeDiveRemote do
+        task.wait(2)
+        NativeDiveRemote = FindNativeDiveRemote()
+        if NativeDiveRemote and State.DebugMode then
+            print("[Maritaca] Remote Dive encontrado:", NativeDiveRemote:GetFullName())
+        end
+    end
+end)
 
-    -- Rotaciona o goleiro pra deitar (visual de mergulho)
-    if State.SmartDive then
+-- ======================================================
+-- TECLAS DE MERGULHO DO JOGO
+-- ======================================================
+-- Baseado no script original: A+Q (esquerda), D+Q (direita), Space (alto)
+local DIVE_KEYS = {
+    LEFT_LOW  = {Enum.KeyCode.Q, Enum.KeyCode.A},
+    RIGHT_LOW = {Enum.KeyCode.Q, Enum.KeyCode.D},
+    LEFT_HIGH = {Enum.KeyCode.Space, Enum.KeyCode.Q, Enum.KeyCode.A},
+    RIGHT_HIGH= {Enum.KeyCode.Space, Enum.KeyCode.Q, Enum.KeyCode.D},
+    CENTER    = {Enum.KeyCode.Space},
+}
+
+local function PressKeys(keys, duration)
+    for _, key in ipairs(keys) do
+        VirtualInput:SendKeyEvent(true, key, false, game)
+    end
+    task.wait(duration or 0.15)
+    for _, key in ipairs(keys) do
+        VirtualInput:SendKeyEvent(false, key, false, game)
+    end
+end
+
+-- ======================================================
+-- EXECUTA O MERGULHO NATIVO
+-- ======================================================
+local isDiving = false
+
+local function TriggerNativeDive(isRight, isHigh)
+    if isDiving then return end
+    isDiving = true
+
+    -- 1) Dispara o RemoteEvent nativo (ativa o sistema do jogo)
+    if State.UseNativeDive and NativeDiveRemote then
         pcall(function()
-            local lookDir = isRight and 1 or -1
-            local newCF = root.CFrame * CFrame.Angles(0, 0, math.rad(-60 * lookDir))
-            root.CFrame = newCF
+            NativeDiveRemote:FireServer()
         end)
     end
-    return true
-end
 
-local function ExecuteDive(ballPos, isRight, high)
-    -- 1: tenta pular (Humanoid)
-    Layer1_Jump(high)
-    -- 2: simula input (toque/clique)
-    task.spawn(function() Layer2_TouchInput(ballPos, isRight) end)
-    -- 3: força física (sempre)
-    Layer3_Physics(ballPos, isRight, high)
+    -- 2) Pressiona as teclas correspondentes
+    local keys
+    if isHigh then
+        keys = isRight and DIVE_KEYS.RIGHT_HIGH or DIVE_KEYS.LEFT_HIGH
+    else
+        keys = isRight and DIVE_KEYS.RIGHT_LOW or DIVE_KEYS.LEFT_LOW
+    end
+
+    task.spawn(function()
+        PressKeys(keys, 0.15)
+    end)
+
+    task.delay(State.DiveCooldown, function()
+        isDiving = false
+    end)
 end
 
 -- ======================================================
@@ -235,7 +263,7 @@ SphereVisual.Anchored = true
 SphereVisual.Parent = nil
 
 -- ======================================================
--- LOOP AUTO DIVE
+-- LOOP AUTO DIVE (COM PREVISÃO DE TRAJETÓRIA)
 -- ======================================================
 RunService.Heartbeat:Connect(function()
     if not State.AutoDiveEnabled then return end
@@ -246,26 +274,35 @@ RunService.Heartbeat:Connect(function()
     local hum  = char and char:FindFirstChildOfClass("Humanoid")
     if not (ball and root and hum and hum.Health > 0) then return end
 
-    local ballPos = ball.Position
-    local rootPos = root.Position
-    local dist    = (rootPos - ballPos).Magnitude
-    local vel     = ball.AssemblyLinearVelocity.Magnitude
+    local vel = ball.AssemblyLinearVelocity
+    local speed = vel.Magnitude
 
-    -- Detecção mais permissiva: perto OU se movendo rápido pra perto
-    local fastApproach = vel > 20 and dist < State.AutoDiveRange * 1.5
+    -- Previsão da posição da bola (como no script original)
+    local predictScale = (speed > 10) and 0.25 or 0.05
+    local targetPos = ball.Position + (vel * predictScale)
 
-    if (dist <= State.AutoDiveRange or fastApproach) and (tick() - State.lastDiveTime) > State.DiveCooldown then
-        State.lastDiveTime = tick()
+    local rel = root.CFrame:PointToObjectSpace(targetPos)
+    local dist = (root.Position - ball.Position).Magnitude
 
-        local localPos = root.CFrame:PointToObjectSpace(ballPos)
-        local isRight  = localPos.X > 0
-        local isHigh   = ballPos.Y > (rootPos.Y + 1.0)
+    -- Verifica se a bola está na zona de defesa
+    if math.abs(rel.Z) > 12 then return end  -- bola muito longe em profundidade
 
-        ExecuteDive(ballPos, isRight, isHigh)
+    local threshold = (speed > 25) and 2.5 or 1.5
+    local isHigh = (targetPos.Y - root.Position.Y) > 3.5
 
-        if State.DebugMode then
-            print(("[Maritaca] DIVE -> dist=%.1f vel=%.1f lado=%s alto=%s")
-                :format(dist, vel, isRight and "R" or "L", tostring(isHigh)))
+    if dist <= State.AutoDiveRange and (tick() - State.lastDiveTime) > State.DiveCooldown then
+        if rel.X < -threshold then
+            State.lastDiveTime = tick()
+            TriggerNativeDive(false, isHigh)  -- esquerda
+            if State.DebugMode then print("[Maritaca] DIVE ESQUERDA alto=", isHigh) end
+        elseif rel.X > threshold then
+            State.lastDiveTime = tick()
+            TriggerNativeDive(true, isHigh)   -- direita
+            if State.DebugMode then print("[Maritaca] DIVE DIREITA alto=", isHigh) end
+        elseif math.abs(rel.X) <= threshold and isHigh then
+            State.lastDiveTime = tick()
+            TriggerNativeDive(true, false)    -- centro (pulo)
+            if State.DebugMode then print("[Maritaca] DIVE CENTRO") end
         end
     end
 end)
@@ -300,11 +337,6 @@ RunService.Heartbeat:Connect(function()
                         end)
                     end
                 end
-                for _, pp in ipairs(ball:GetDescendants()) do
-                    if pp:IsA("ProximityPrompt") and pp.Enabled then
-                        pcall(function() fireproximityprompt(pp) end)
-                    end
-                end
             end
         end
     elseif SphereVisual.Parent then
@@ -313,108 +345,61 @@ RunService.Heartbeat:Connect(function()
 end)
 
 -- ======================================================
--- ANTI LAG (REMOVE TEXTURAS)
+-- ANTI LAG
 -- ======================================================
-local AntiLagActive   = false
-local OriginalProps   = {}   -- guarda texturas removidas para restaurar
+local AntiLagActive = false
+local OriginalProps = {}
+local AntiLagConn
 
 local function ApplyAntiLag()
-    -- 1) Remove texturas de todas as partes
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            if obj.TextureID and obj.TextureID ~= "" then
-                OriginalProps[obj] = {key = "TextureID", value = obj.TextureID}
-                pcall(function() obj.TextureID = "" end)
-            end
-            if obj:IsA("MeshPart") and obj.TextureID and obj.TextureID ~= "" then
-                OriginalProps[obj] = {key = "TextureID", value = obj.TextureID}
-                pcall(function() obj.TextureID = "" end)
-            end
+        if obj:IsA("BasePart") and obj.TextureID and obj.TextureID ~= "" then
+            OriginalProps[obj] = {key = "TextureID", value = obj.TextureID}
+            pcall(function() obj.TextureID = "" end)
         elseif obj:IsA("Decal") or obj:IsA("Texture") then
             if obj.Texture and obj.Texture ~= "" then
                 OriginalProps[obj] = {key = "Texture", value = obj.Texture}
                 pcall(function() obj.Texture = "" end)
             end
         elseif obj:IsA("SurfaceAppearance") then
-            OriginalProps[obj] = {
-                ColorMap = obj.ColorMap,
-                NormalMap = obj.NormalMap,
-                RoughnessMap = obj.RoughnessMap,
-                MetalnessMap = obj.MetalnessMap,
-            }
+            OriginalProps[obj] = {ColorMap = obj.ColorMap, NormalMap = obj.NormalMap}
             pcall(function()
-                obj.ColorMap     = ""
-                obj.NormalMap    = ""
-                obj.RoughnessMap = ""
-                obj.MetalnessMap = ""
+                obj.ColorMap = ""
+                obj.NormalMap = ""
             end)
+        elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam")
+            or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+            pcall(function() obj.Enabled = false end)
         end
     end
 
-    -- 2) Remove materiais detalhados de terreno (grama, etc)
     pcall(function()
         Workspace.Terrain.Decoration = false
+        Lighting.GlobalShadows = false
     end)
-
-    -- 3) Baixa qualidade de iluminação
-    pcall(function()
-        Lighting.GlobalShadows   = false
-        Lighting.FogEnd          = 100000
-        Lighting.Brightness      = 2
-        Lighting.EnvironmentDiffuseScale  = 0
-        Lighting.EnvironmentSpecularScale = 0
-    end)
-
-    -- 4) Desativa efeitos pesados
-    for _, obj in ipairs(Lighting:GetChildren()) do
-        if obj:IsA("PostEffect") or obj:IsA("Atmosphere") or obj:IsA("Sky") then
-            pcall(function() obj.Enabled = false end)
-        end
-    end
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-            pcall(function() obj.Enabled = false end)
-        end
-    end
 end
 
 local function RestoreAntiLag()
-    -- Restaura tudo que foi removido
     for obj, data in pairs(OriginalProps) do
         if obj and obj.Parent then
             pcall(function()
-                if data.key then
-                    obj[data.key] = data.value
-                else
-                    obj.ColorMap     = data.ColorMap
-                    obj.NormalMap    = data.NormalMap
-                    obj.RoughnessMap = data.RoughnessMap
-                    obj.MetalnessMap = data.MetalnessMap
-                end
+                if data.key then obj[data.key] = data.value
+                else obj.ColorMap = data.ColorMap obj.NormalMap = data.NormalMap end
             end)
         end
     end
     OriginalProps = {}
-
     pcall(function()
         Workspace.Terrain.Decoration = true
         Lighting.GlobalShadows = true
     end)
-
-    for _, obj in ipairs(Lighting:GetChildren()) do
-        if obj:IsA("PostEffect") or obj:IsA("Atmosphere") or obj:IsA("Sky") then
-            pcall(function() obj.Enabled = true end)
-        end
-    end
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+        if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
             pcall(function() obj.Enabled = true end)
         end
     end
 end
 
--- Monitorar novas partes que entram (mantém anti lag aplicado)
-local AntiLagConn
 local function StartAntiLagWatcher()
     if AntiLagConn then AntiLagConn:Disconnect() end
     AntiLagConn = Workspace.DescendantAdded:Connect(function(obj)
@@ -445,12 +430,19 @@ end
 -- ======================================================
 -- UI - GOLEIRO
 -- ======================================================
-Tabs.Goleiro:AddSection("Auto Dive (Mergulho Automático)")
+Tabs.Goleiro:AddSection("Auto Dive (Mergulho Nativo do Jogo)")
 
 Tabs.Goleiro:AddToggle("AutoDiveToggle", {
     Title = "Ativar Auto Dive",
     Default = false,
     Callback = function(v) State.AutoDiveEnabled = v end
+})
+
+Tabs.Goleiro:AddToggle("NativeDiveToggle", {
+    Title = "Usar RemoteEvent nativo (recomendado)",
+    Description = "Se desativado, usa apenas as teclas.",
+    Default = true,
+    Callback = function(v) State.UseNativeDive = v end
 })
 
 Tabs.Goleiro:AddSlider("DiveRangeSlider", {
@@ -461,20 +453,8 @@ Tabs.Goleiro:AddSlider("DiveRangeSlider", {
 
 Tabs.Goleiro:AddSlider("DiveCooldownSlider", {
     Title = "Cooldown entre mergulhos (s)",
-    Default = 0.25, Min = 0.10, Max = 1.00, Rounding = 2,
+    Default = 0.35, Min = 0.15, Max = 1.00, Rounding = 2,
     Callback = function(v) State.DiveCooldown = v end
-})
-
-Tabs.Goleiro:AddToggle("ForceVelocityToggle", {
-    Title = "Forçar impulso físico (garantido)",
-    Default = true,
-    Callback = function(v) State.ForceVelocity = v end
-})
-
-Tabs.Goleiro:AddToggle("SmartDiveToggle", {
-    Title = "Rotacionar corpo ao mergulhar (visual)",
-    Default = true,
-    Callback = function(v) State.SmartDive = v end
 })
 
 -- ======================================================
@@ -501,39 +481,21 @@ Tabs.Reach:AddToggle("ReachCircleToggle", {
 })
 
 -- ======================================================
--- UI - FPS (NOVO)
+-- UI - FPS
 -- ======================================================
 Tabs.FPS:AddSection("Desempenho")
 
 Tabs.FPS:AddToggle("AntiLagToggle", {
     Title = "Anti Lag (Remove Texturas)",
-    Description = "Remove texturas, partículas, sombras e efeitos para deixar o jogo mais leve.",
+    Description = "Remove texturas e efeitos para deixar o jogo mais leve.",
     Default = false,
     Callback = function(v)
         SetAntiLag(v)
         Fluent:Notify({
             Title = "Maritaca FPS",
-            Content = v and "Anti Lag ATIVADO — jogo mais leve!" or "Anti Lag desativado — texturas restauradas.",
+            Content = v and "Anti Lag ATIVADO!" or "Texturas restauradas.",
             Duration = 4
         })
-    end
-})
-
-Tabs.FPS:AddButton({
-    Title = "Aplicar Anti Lag Agora",
-    Description = "Roda o Anti Lag sem precisar reiniciar.",
-    Callback = function()
-        SetAntiLag(true)
-        Fluent:Notify({ Title = "Maritaca FPS", Content = "Anti Lag aplicado!", Duration = 3 })
-    end
-})
-
-Tabs.FPS:AddButton({
-    Title = "Restaurar Texturas",
-    Description = "Restaura tudo que o Anti Lag removeu.",
-    Callback = function()
-        SetAntiLag(false)
-        Fluent:Notify({ Title = "Maritaca FPS", Content = "Texturas restauradas.", Duration = 3 })
     end
 })
 
@@ -543,35 +505,40 @@ Tabs.FPS:AddButton({
 Tabs.Debug:AddSection("Debug / Diagnóstico")
 
 Tabs.Debug:AddToggle("DebugToggle", {
-    Title = "Modo Debug (imprime no console)",
+    Title = "Modo Debug",
     Default = false,
     Callback = function(v) State.DebugMode = v end
 })
 
 Tabs.Debug:AddButton({
-    Title = "Forçar Mergulho Esquerda (teste)",
+    Title = "Testar Remote Dive",
+    Description = "Dispara o RemoteEvent de dive nativo.",
     Callback = function()
-        local ball = GetBall()
-        local pos = ball and ball.Position or (Character.HumanoidRootPart.Position + Vector3.new(-15, 0, 0))
-        ExecuteDive(pos, false, false)
+        if NativeDiveRemote then
+            NativeDiveRemote:FireServer()
+            Fluent:Notify({Title = "Maritaca", Content = "Remote Dive disparado!", Duration = 3})
+        else
+            Fluent:Notify({Title = "Maritaca", Content = "Remote Dive NÃO encontrado.", Duration = 3})
+        end
     end
 })
 
 Tabs.Debug:AddButton({
-    Title = "Forçar Mergulho Direita (teste)",
-    Callback = function()
-        local ball = GetBall()
-        local pos = ball and ball.Position or (Character.HumanoidRootPart.Position + Vector3.new(15, 0, 0))
-        ExecuteDive(pos, true, false)
-    end
+    Title = "Forçar Dive Esquerda (teste)",
+    Callback = function() TriggerNativeDive(false, false) end
+})
+
+Tabs.Debug:AddButton({
+    Title = "Forçar Dive Direita (teste)",
+    Callback = function() TriggerNativeDive(true, false) end
 })
 
 -- ======================================================
--- NOTIFICAÇÃO E SELEÇÃO
+-- INICIALIZAÇÃO
 -- ======================================================
 Fluent:Notify({
-    Title = "Maritaca Hub V10",
-    Content = "Auto Dive (triplo) + Anti Lag carregados. Teste o Dive na aba Debug!",
+    Title = "Maritaca Hub V11",
+    Content = "Mergulho NATIVO carregado! Remote: " .. (NativeDiveRemote and "OK" or "buscando..."),
     Duration = 6
 })
 
