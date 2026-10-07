@@ -1,599 +1,606 @@
--- ═══════════════════════════════════════════════════════════════════
--- 🦜 MARITACA HUB v17 - COMPLETO (REACH + GK + AUTO DIVE)
--- ═══════════════════════════════════════════════════════════════════
+-- =======================================================
+-- SCRIPT THE CLASSIC SOCCER - PAINEL FLUENT + REACH ESFERA
+-- TP + REACH + FOLLOW + Esfera de Alcance
+-- =======================================================
 
-local player = game.Players.LocalPlayer
-local UIS = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
-local StarterPack = game:GetService("StarterPack")
+print("=== SCRIPT INICIANDO ===")
+
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
+local player = Players.LocalPlayer
 
-local config = {
-    reachEnabled = false,
-    autoDiveEnabled = false,
-    reachSize = 20,
-    showCircle = true,
-    detectedBall = nil,
-    scannerMode = false,
-    autoDiveDelay = 0.25,
-    diveRadar = 60
-}
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
 
--- LIMPEZA
-local pGui = player:WaitForChild("PlayerGui")
-for _, v in pairs(pGui:GetChildren()) do
-    if v.Name:find("Maritaca") or v.Name == "DebugBola" then v:Destroy() end
+-- Estados
+local seguindo = false
+local reachAtivo = false
+local circuloVisivel = true
+local tamanhoReach = 8 -- Padrão (1 a 15)
+local circulo = nil
+local conexaoCirculo = nil
+
+-- =======================================================
+-- PEGAR A BOLA OFICIAL (SÓ RealMatch)
+-- =======================================================
+local function obterPosicaoBola()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        local rm = obj:FindFirstChild("RealMatch")
+        if rm and (rm.Value == true or rm.Value == 1) then
+            if obj:IsA("BasePart") then
+                return obj.Position
+            elseif obj:IsA("Model") then
+                if obj.PrimaryPart then
+                    return obj.PrimaryPart.Position
+                end
+                local ok, pivot = pcall(function() return obj:GetPivot().Position end)
+                if ok then return pivot end
+            end
+        end
+    end
+    return nil
 end
 
--- ═══════════════════════════════════════════════════════════════════
--- 🎨 UI PRINCIPAL
--- ═══════════════════════════════════════════════════════════════════
-local sg = Instance.new("ScreenGui")
-sg.Name = "MaritacaHub"
-sg.ResetOnSpawn = false
-sg.IgnoreGuiInset = true
-sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-sg.Parent = pGui
+-- =======================================================
+-- ANIMAÇÃO
+-- =======================================================
+local function tocarAnimacaoAndar()
+    local client = ReplicatedStorage:FindFirstChild("Client")
+    if client then
+        client:FireServer("NoobGlitch")
+    end
+end
 
--- BOTÃO 🦜
-local ballBtn = Instance.new("TextButton")
-ballBtn.Size = UDim2.new(0, 55, 0, 55)
-ballBtn.Position = UDim2.new(0, 15, 0.5, -27)
-ballBtn.BackgroundColor3 = Color3.fromRGB(30, 180, 80)
-ballBtn.Text = "🦜"
-ballBtn.TextSize = 28
-ballBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-ballBtn.BorderSizePixel = 0
-ballBtn.AutoButtonColor = false
-ballBtn.Active = true
-ballBtn.ZIndex = 100
-ballBtn.Parent = sg
+-- =======================================================
+-- ESFERA DE ALCANCE (VISUAL - ENVOLVE O CORPO)
+-- =======================================================
+local function criarCirculo()
+    if circulo and circulo.Parent then
+        circulo:Destroy()
+    end
+    
+    -- Esfera ao redor do personagem
+    circulo = Instance.new("Part")
+    circulo.Name = "ReachSphere"
+    circulo.Shape = Enum.PartType.Ball
+    circulo.Size = Vector3.new(tamanhoReach * 2, tamanhoReach * 2, tamanhoReach * 2)
+    circulo.Anchored = true
+    circulo.CanCollide = false
+    circulo.CanQuery = false
+    circulo.CanTouch = false
+    circulo.Material = Enum.Material.Neon
+    circulo.Color = Color3.fromRGB(0, 255, 100) -- VERDE (igual ao print)
+    circulo.Transparency = 0.85 -- Bem transparente pra não atrapalhar a visão
+    circulo.Parent = workspace
+    
+    -- Inicia o loop que atualiza a posição da esfera
+    if conexaoCirculo then
+        conexaoCirculo:Disconnect()
+    end
+    
+    conexaoCirculo = RunService.RenderStepped:Connect(function()
+        if not circulo or not circulo.Parent then return end
+        if not humanoidRootPart then return end
+        
+        -- Centraliza a esfera no HumanoidRootPart (meio do corpo)
+        local posPlayer = humanoidRootPart.Position
+        circulo.CFrame = CFrame.new(posPlayer)
+        
+        -- Visibilidade
+        circulo.Transparency = circuloVisivel and 0.85 or 1
+    end)
+end
 
-local bC = Instance.new("UICorner")
-bC.CornerRadius = UDim.new(1, 0)
-bC.Parent = ballBtn
+local function atualizarCirculo()
+    if circulo then
+        circulo.Size = Vector3.new(tamanhoReach * 2, tamanhoReach * 2, tamanhoReach * 2)
+    end
+end
 
-local bS = Instance.new("UIStroke")
-bS.Color = Color3.fromRGB(255, 220, 50)
-bS.Thickness = 3
-bS.Parent = ballBtn
+local function removerCirculo()
+    if conexaoCirculo then
+        conexaoCirculo:Disconnect()
+        conexaoCirculo = nil
+    end
+    if circulo then
+        circulo:Destroy()
+        circulo = nil
+    end
+end
 
--- JANELA
-local win = Instance.new("Frame")
-win.Size = UDim2.new(0, 500, 0, 340)
-win.Position = UDim2.new(0.5, -250, 0.5, -170)
-win.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
-win.BorderSizePixel = 0
-win.Visible = false
-win.ZIndex = 100
-win.Parent = sg
+-- =======================================================
+-- FUNÇÕES DE AÇÃO
+-- =======================================================
+local function acaoTeleporte()
+    local posBola = obterPosicaoBola()
+    if posBola then
+        humanoidRootPart.CFrame = CFrame.new(posBola + Vector3.new(0, 3, 0))
+        print("⚡ Teleportado para a bola oficial!")
+    else
+        warn("❌ Bola oficial não encontrada (RealMatch != true)")
+    end
+end
 
-local winC = Instance.new("UICorner")
-winC.CornerRadius = UDim.new(0, 12)
-winC.Parent = win
+local conexaoFollow = nil
 
-local winS = Instance.new("UIStroke")
-winS.Color = Color3.fromRGB(45, 45, 55)
-winS.Thickness = 1
-winS.Parent = win
+local function ativarFollow(estado)
+    seguindo = estado
+    
+    if seguindo then
+        conexaoFollow = RunService.RenderStepped:Connect(function()
+            if not seguindo then return end
+            
+            local posBola = obterPosicaoBola()
+            if not posBola or not humanoidRootPart or not humanoid then return end
+            
+            local posPlayer = humanoidRootPart.Position
+            local direcao = Vector3.new(
+                posBola.X - posPlayer.X,
+                0,
+                posBola.Z - posPlayer.Z
+            )
+            
+            local distancia = direcao.Magnitude
+            if distancia < 1.5 then return end
+            
+            local dirNormalizada = direcao.Unit
+            humanoid:Move(dirNormalizada, false)
+            tocarAnimacaoAndar()
+        end)
+        print("=== FOLLOW ATIVADO ===")
+    else
+        if conexaoFollow then
+            conexaoFollow:Disconnect()
+            conexaoFollow = nil
+        end
+        if humanoid then
+            humanoid:Move(Vector3.new(0, 0, 0), false)
+        end
+        print("=== FOLLOW DESATIVADO ===")
+    end
+end
 
--- HEADER
-local header = Instance.new("Frame")
-header.Size = UDim2.new(1, 0, 0, 45)
-header.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-header.BorderSizePixel = 0
-header.ZIndex = 101
-header.Parent = win
+local function ativarReach(estado)
+    reachAtivo = estado
+    if reachAtivo then
+        -- Hitbox do reach (só chão)
+        humanoidRootPart.Size = Vector3.new(tamanhoReach, 2, tamanhoReach)
+        humanoidRootPart.Transparency = 0.5
+        criarCirculo()
+        print("🎯 Reach ativado! (" .. tamanhoReach .. ")")
+    else
+        humanoidRootPart.Size = Vector3.new(2, 2, 1)
+        humanoidRootPart.Transparency = 1
+        removerCirculo()
+        print("🎯 Reach desativado")
+    end
+end
 
-local hC = Instance.new("UICorner")
-hC.CornerRadius = UDim.new(0, 12)
-hC.Parent = header
+local function alterarTamanhoReach(novoTamanho)
+    tamanhoReach = novoTamanho
+    if reachAtivo then
+        humanoidRootPart.Size = Vector3.new(tamanhoReach, 2, tamanhoReach)
+        atualizarCirculo()
+    end
+    print("📏 Tamanho do reach: " .. tamanhoReach)
+end
 
-local hFix = Instance.new("Frame")
-hFix.Size = UDim2.new(1, 0, 0.5, 0)
-hFix.Position = UDim2.new(0, 0, 0.5, 0)
-hFix.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-hFix.BorderSizePixel = 0
-hFix.ZIndex = 101
-hFix.Parent = header
+-- =======================================================
+-- ScreenGui Principal
+-- =======================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FluentStyleGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
 
-local headerIcon = Instance.new("TextLabel")
-headerIcon.Size = UDim2.new(0, 32, 0, 32)
-headerIcon.Position = UDim2.new(0, 10, 0, 6)
-headerIcon.BackgroundColor3 = Color3.fromRGB(30, 180, 80)
-headerIcon.Text = "🦜"
-headerIcon.TextSize = 18
-headerIcon.BorderSizePixel = 0
-headerIcon.ZIndex = 102
-headerIcon.Parent = header
+-- =======================================================
+-- BOTÃO FLUTUANTE (SATURNO)
+-- =======================================================
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "MinimizeButton"
+toggleBtn.Size = UDim2.new(0, 50, 0, 50)
+toggleBtn.Position = UDim2.new(0.02, 0, 0.2, 0)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+toggleBtn.Text = "🪐"
+toggleBtn.TextSize = 26
+toggleBtn.Parent = screenGui
 
-local hiC = Instance.new("UICorner")
-hiC.CornerRadius = UDim.new(0, 8)
-hiC.Parent = headerIcon
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(1, 0)
+btnCorner.Parent = toggleBtn
 
-local headerTitle = Instance.new("TextLabel")
-headerTitle.Size = UDim2.new(0, 200, 0, 22)
-headerTitle.Position = UDim2.new(0, 50, 0, 4)
-headerTitle.BackgroundTransparency = 1
-headerTitle.Text = "MARITACA HUB"
-headerTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-headerTitle.TextSize = 15
-headerTitle.Font = Enum.Font.GothamBold
-headerTitle.TextXAlignment = Enum.TextXAlignment.Left
-headerTitle.ZIndex = 102
-headerTitle.Parent = header
+local btnStroke = Instance.new("UIStroke")
+btnStroke.Color = Color3.fromRGB(0, 170, 255)
+btnStroke.Thickness = 2
+btnStroke.Parent = toggleBtn
 
-local headerSub = Instance.new("TextLabel")
-headerSub.Size = UDim2.new(0, 200, 0, 15)
-headerSub.Position = UDim2.new(0, 50, 0, 24)
-headerSub.BackgroundTransparency = 1
-headerSub.Text = "v17 • The Classic Soccer"
-headerSub.TextColor3 = Color3.fromRGB(150, 150, 160)
-headerSub.TextSize = 10
-headerSub.Font = Enum.Font.Gotham
-headerSub.TextXAlignment = Enum.TextXAlignment.Left
-headerSub.ZIndex = 102
-headerSub.Parent = header
+-- =======================================================
+-- JANELA PRINCIPAL
+-- =======================================================
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 480, 0, 360)
+mainFrame.Position = UDim2.new(0.5, -240, 0.5, -180)
+mainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+mainFrame.BorderSizePixel = 0
+mainFrame.Visible = true
+mainFrame.Parent = screenGui
 
-local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 28, 0, 28)
-closeBtn.Position = UDim2.new(1, -36, 0, 9)
-closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-closeBtn.Text = "×"
-closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeBtn.TextSize = 20
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.BorderSizePixel = 0
-closeBtn.AutoButtonColor = false
-closeBtn.ZIndex = 102
-closeBtn.Parent = header
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 10)
+mainCorner.Parent = mainFrame
 
-local cC = Instance.new("UICorner")
-cC.CornerRadius = UDim.new(0, 6)
-cC.Parent = closeBtn
-closeBtn.MouseButton1Click:Connect(function() win.Visible = false end)
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = Color3.fromRGB(45, 45, 55)
+mainStroke.Thickness = 1
+mainStroke.Parent = mainFrame
 
--- SIDEBAR
-local sidebar = Instance.new("Frame")
-sidebar.Size = UDim2.new(0, 135, 1, -45)
-sidebar.Position = UDim2.new(0, 0, 0, 45)
-sidebar.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
-sidebar.BorderSizePixel = 0
-sidebar.ZIndex = 101
-sidebar.Parent = win
+toggleBtn.MouseButton1Click:Connect(function()
+    mainFrame.Visible = not mainFrame.Visible
+end)
 
-local sbC = Instance.new("UICorner")
-sbC.CornerRadius = UDim.new(0, 12)
-sbC.Parent = sidebar
+-- Arrastar
+local function tornarArrastavel(frame)
+    local dragging, dragInput, dragStart, startPos
+    
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
 
-local tabsFrame = Instance.new("Frame")
-tabsFrame.Size = UDim2.new(1, -12, 1, -12)
-tabsFrame.Position = UDim2.new(0, 6, 0, 6)
-tabsFrame.BackgroundTransparency = 1
-tabsFrame.ZIndex = 102
-tabsFrame.Parent = sidebar
+    frame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
 
-local tabsLayout = Instance.new("UIListLayout")
-tabsLayout.Padding = UDim.new(0, 4)
-tabsLayout.Parent = tabsFrame
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+end
 
-local contentArea = Instance.new("Frame")
-contentArea.Size = UDim2.new(1, -145, 1, -53)
-contentArea.Position = UDim2.new(0, 140, 0, 50)
-contentArea.BackgroundTransparency = 1
-contentArea.ZIndex = 101
-contentArea.Parent = win
+tornarArrastavel(toggleBtn)
+tornarArrastavel(mainFrame)
 
-local pages = {}
-local tabButtons = {}
+-- =======================================================
+-- BARRA LATERAL
+-- =======================================================
+local sideBar = Instance.new("Frame")
+sideBar.Name = "SideBar"
+sideBar.Size = UDim2.new(0, 130, 1, 0)
+sideBar.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+sideBar.BorderSizePixel = 0
+sideBar.Parent = mainFrame
 
-local function createTab(name, icon)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 34)
-    btn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-    btn.Text = "  " .. icon .. "  " .. name
-    btn.TextColor3 = Color3.fromRGB(200, 200, 210)
-    btn.Font = Enum.Font.GothamMedium
-    btn.TextSize = 12
-    btn.TextXAlignment = Enum.TextXAlignment.Left
-    btn.BorderSizePixel = 0
-    btn.AutoButtonColor = false
-    btn.ZIndex = 103
-    btn.Parent = tabsFrame
+local sideCorner = Instance.new("UICorner")
+sideCorner.CornerRadius = UDim.new(0, 10)
+sideCorner.Parent = sideBar
 
-    local bc = Instance.new("UICorner")
-    bc.CornerRadius = UDim.new(0, 8)
-    bc.Parent = btn
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 40)
+title.BackgroundTransparency = 1
+title.Text = "⚽ TPS SOCCER"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 13
+title.Parent = sideBar
 
-    local page = Instance.new("Frame")
+local tabContainer = Instance.new("Frame")
+tabContainer.Size = UDim2.new(1, -10, 1, -50)
+tabContainer.Position = UDim2.new(0, 5, 0, 45)
+tabContainer.BackgroundTransparency = 1
+tabContainer.Parent = sideBar
+
+local tabLayout = Instance.new("UIListLayout")
+tabLayout.Padding = UDim.new(0, 5)
+tabLayout.Parent = tabContainer
+
+local contentFrame = Instance.new("Frame")
+contentFrame.Name = "ContentFrame"
+contentFrame.Size = UDim2.new(1, -140, 1, -20)
+contentFrame.Position = UDim2.new(0, 135, 0, 10)
+contentFrame.BackgroundTransparency = 1
+contentFrame.Parent = mainFrame
+
+-- Sistema de Abas
+local paginas = {}
+
+local function criarAba(nome, id)
+    local btnTab = Instance.new("TextButton")
+    btnTab.Size = UDim2.new(1, 0, 0, 32)
+    btnTab.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+    btnTab.Text = "  " .. nome
+    btnTab.TextColor3 = Color3.fromRGB(200, 200, 200)
+    btnTab.Font = Enum.Font.GothamMedium
+    btnTab.TextSize = 12
+    btnTab.TextXAlignment = Enum.TextXAlignment.Left
+    btnTab.Parent = tabContainer
+
+    local tabCorner = Instance.new("UICorner")
+    tabCorner.CornerRadius = UDim.new(0, 6)
+    tabCorner.Parent = btnTab
+
+    local page = Instance.new("ScrollingFrame")
+    page.Name = id .. "Page"
     page.Size = UDim2.new(1, 0, 1, 0)
     page.BackgroundTransparency = 1
     page.Visible = false
-    page.ZIndex = 102
-    page.Parent = contentArea
+    page.ScrollBarThickness = 2
+    page.Parent = contentFrame
 
-    local pl = Instance.new("UIListLayout")
-    pl.Padding = UDim.new(0, 6)
-    pl.Parent = page
+    local pageLayout = Instance.new("UIListLayout")
+    pageLayout.Padding = UDim.new(0, 8)
+    pageLayout.Parent = page
 
-    pages[name] = page
-    tabButtons[name] = btn
+    paginas[id] = {btn = btnTab, frame = page}
 
-    btn.MouseButton1Click:Connect(function()
-        for n, p in pairs(pages) do
-            p.Visible = (n == name)
-            tabButtons[n].BackgroundColor3 = (n == name) and Color3.fromRGB(30, 180, 80) or Color3.fromRGB(28, 28, 36)
-            tabButtons[n].TextColor3 = (n == name) and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(200, 200, 210)
+    btnTab.MouseButton1Click:Connect(function()
+        for _, v in pairs(paginas) do
+            v.frame.Visible = false
+            v.btn.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+            v.btn.TextColor3 = Color3.fromRGB(200, 200, 200)
         end
+        page.Visible = true
+        btnTab.BackgroundColor3 = Color3.fromRGB(45, 45, 58)
+        btnTab.TextColor3 = Color3.new(1, 1, 1)
     end)
+
     return page
 end
 
-local homePage = createTab("Início", "🏠")
-local reachPage = createTab("Reach", "⚽")
-local gkPage = createTab("Goleiro", "🥅")
-local divePage = createTab("Auto Dive", "🏊")
-local configPage = createTab("Config", "⚙️")
+local abaGeral = criarAba("Geral", "Geral")
+local abaReach = criarAba("Reach", "Reach")
+local abaInfo = criarAba("Info", "Info")
 
-pages["Início"].Visible = true
-tabButtons["Início"].BackgroundColor3 = Color3.fromRGB(30, 180, 80)
-tabButtons["Início"].TextColor3 = Color3.fromRGB(255, 255, 255)
+paginas["Geral"].frame.Visible = true
+paginas["Geral"].btn.BackgroundColor3 = Color3.fromRGB(45, 45, 58)
 
-local function makeBtn(parent, text, color)
+-- =======================================================
+-- COMPONENTES
+-- =======================================================
+local function criarBotaoAcao(pagina, texto, callback)
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 36)
-    btn.BackgroundColor3 = color or Color3.fromRGB(38, 38, 48)
-    btn.Text = text
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Size = UDim2.new(1, -5, 0, 38)
+    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    btn.Text = texto
+    btn.TextColor3 = Color3.new(1, 1, 1)
     btn.Font = Enum.Font.GothamMedium
-    btn.TextSize = 12
-    btn.BorderSizePixel = 0
-    btn.AutoButtonColor = false
-    btn.ZIndex = 103
-    btn.Parent = parent
+    btn.TextSize = 13
+    btn.Parent = pagina
 
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 8)
-    c.Parent = btn
-    return btn
-end
-
-local function makeLabel(parent, text, color, height)
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, 0, 0, height or 26)
-    lbl.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-    lbl.Text = text
-    lbl.TextColor3 = color or Color3.fromRGB(200, 200, 210)
-    lbl.Font = Enum.Font.Gotham
-    lbl.TextSize = 11
-    lbl.BorderSizePixel = 0
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.TextWrapped = true
-    lbl.ZIndex = 103
-    lbl.Parent = parent
-
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 6)
-    c.Parent = lbl
-    return lbl
-end
-
--- ═══════════════════════════════════════════════════════════════════
--- 🥅 FUNÇÃO GK (CORRIGIDA) - AGORA COM ARGUMENTO
--- ═══════════════════════════════════════════════════════════════════
-function fireGK(key)
-    local char = player.Character
-    local fired = false
-    
-    -- ⚡ Tenta FireServer SEM e COM argumento
-    local function tryRemote(remote)
-        if not remote then return false end
-        local ok = pcall(function()
-            if remote:IsA("RemoteEvent") then
-                remote:FireServer()  -- sem args (padrão)
-                return true
-            elseif remote:IsA("RemoteFunction") then
-                remote:InvokeServer()
-                return true
-            elseif remote:IsA("BindableEvent") then
-                remote:Fire()
-                return true
-            end
-        end)
-        return ok
-    end
-    
-    -- 1️⃣ GK dentro do Character (equipado)
-    if char then
-        local gk = char:FindFirstChild("GK")
-        if gk then
-            local remote = gk:FindFirstChild(key)
-            if tryRemote(remote) then
-                print("[GK] " .. key .. " ✓ Character.GK")
-                return true
-            end
-        end
-    end
-    
-    -- 2️⃣ GK no Backpack
-    local bp = player:FindFirstChild("Backpack")
-    if bp then
-        local gk = bp:FindFirstChild("GK")
-        if gk then
-            local remote = gk:FindFirstChild(key)
-            if tryRemote(remote) then
-                print("[GK] " .. key .. " ✓ Backpack.GK")
-                return true
-            end
-        end
-    end
-    
-    -- 3️⃣ GK no StarterPack
-    local gk = StarterPack:FindFirstChild("GK")
-    if gk then
-        local remote = gk:FindFirstChild(key)
-        if tryRemote(remote) then
-            print("[GK] " .. key .. " ✓ StarterPack.GK")
-            return true
-        end
-    end
-    
-    -- 4️⃣ Remote direto no Character (sem pasta GK)
-    if char then
-        local remote = char:FindFirstChild(key)
-        if tryRemote(remote) then
-            print("[GK] " .. key .. " ✓ Character." .. key)
-            return true
-        end
-    end
-    
-    print("[GK] ✗ FALHOU: " .. key)
-    return false
-end
-
--- ═══ HOME ═══
-local welcome = makeLabel(homePage, "  Bem-vindo ao Maritaca Hub!", Color3.fromRGB(255, 220, 50), 24)
-local ballStatus = makeLabel(homePage, "  🔍 Procurando bola...", Color3.fromRGB(100, 255, 100), 32)
-local diveStatus = makeLabel(homePage, "  🥅 Aguardando dive...", Color3.fromRGB(150, 150, 160), 32)
-
--- ═══ REACH ═══
-local reachBtn = makeBtn(reachPage, "  Reach: DESLIGADO", Color3.fromRGB(200, 50, 50))
-local sizeBtn = makeBtn(reachPage, "  Tamanho: " .. config.reachSize .. " studs")
-local circleBtn = makeBtn(reachPage, "  Círculo: LIGADO", Color3.fromRGB(50, 150, 80))
-local reachInfo = makeLabel(reachPage, "  Se a bola entrar no círculo, ela\n  é puxada automaticamente pro\n  seu pé.", Color3.fromRGB(150, 150, 160), 50)
-
-sizeBtn.MouseButton1Click:Connect(function()
-    config.reachSize = config.reachSize + 5
-    if config.reachSize > 50 then config.reachSize = 5 end
-    sizeBtn.Text = "  Tamanho: " .. config.reachSize .. " studs"
-    if circle then circle.Size = Vector3.new(config.reachSize, config.reachSize, config.reachSize) end
-end)
-
--- ═══ GK ═══
-local gkInfo = makeLabel(gkPage, "  Clique para testar cada comando:", Color3.fromRGB(255, 220, 50), 22)
-
-local gkGrid = Instance.new("Frame")
-gkGrid.Size = UDim2.new(1, 0, 0, 145)
-gkGrid.BackgroundTransparency = 1
-gkGrid.ZIndex = 103
-gkGrid.Parent = gkPage
-
-local gkLayout = Instance.new("UIGridLayout")
-gkLayout.CellSize = UDim2.new(0.5, -3, 0, 32)
-gkLayout.CellPadding = UDim.new(0, 6, 0, 6)
-gkLayout.Parent = gkGrid
-
-local function makeGKBtn(label, key)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 1, 0)
-    btn.BackgroundColor3 = Color3.fromRGB(45, 90, 160)
-    btn.Text = label
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.GothamMedium
-    btn.TextSize = 11
-    btn.BorderSizePixel = 0
-    btn.AutoButtonColor = false
-    btn.ZIndex = 103
-    btn.Parent = gkGrid
-
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 6)
-    c.Parent = btn
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = btn
 
     btn.MouseButton1Click:Connect(function()
-        fireGK(key)
+        if callback then callback() end
     end)
-    return btn
 end
 
-makeGKBtn("↘ Direita Baixo", "C")
-makeGKBtn("↙ Esquerda Baixo", "Z")
-makeGKBtn("↗ Direita Alto", "E")
-makeGKBtn("↖ Esquerda Alto", "Q")
-makeGKBtn("🥅 Avança", "H")
-makeGKBtn("🙌 Agarra Alto", "R")
+local function criarToggle(pagina, texto, callback)
+    local toggleFrame = Instance.new("Frame")
+    toggleFrame.Size = UDim2.new(1, -5, 0, 38)
+    toggleFrame.BackgroundColor3 = Color3.fromRGB(32, 32, 40)
+    toggleFrame.Parent = pagina
 
--- ═══ DIVE ═══
-local diveBtn = makeBtn(divePage, "  Auto Dive: DESLIGADO", Color3.fromRGB(200, 50, 50))
-local diveDelayBtn = makeBtn(divePage, "  Delay: " .. config.autoDiveDelay .. "s")
-local diveRadarBtn = makeBtn(divePage, "  Radar: " .. config.diveRadar .. "m")
-local testBtn = makeBtn(divePage, "  🧪 Testar GK (Avança)", Color3.fromRGB(150, 80, 200))
-local diveInfo = makeLabel(divePage, "  Detecta a bola, calcula a direção\n  e dispara o comando certo.", Color3.fromRGB(150, 150, 160), 40)
+    local tfCorner = Instance.new("UICorner")
+    tfCorner.CornerRadius = UDim.new(0, 6)
+    tfCorner.Parent = toggleFrame
 
-testBtn.MouseButton1Click:Connect(function() fireGK("H") end)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.7, 0, 1, 0)
+    label.Position = UDim2.new(0, 10, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = texto
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 12
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = toggleFrame
 
-diveDelayBtn.MouseButton1Click:Connect(function()
-    config.autoDiveDelay = config.autoDiveDelay + 0.05
-    if config.autoDiveDelay > 0.6 then config.autoDiveDelay = 0.1 end
-    diveDelayBtn.Text = "  Delay: " .. string.format("%.2f", config.autoDiveDelay) .. "s"
-end)
+    local switch = Instance.new("TextButton")
+    switch.Size = UDim2.new(0, 36, 0, 18)
+    switch.Position = UDim2.new(1, -45, 0.5, -9)
+    switch.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+    switch.Text = ""
+    switch.Parent = toggleFrame
 
-diveRadarBtn.MouseButton1Click:Connect(function()
-    config.diveRadar = config.diveRadar + 20
-    if config.diveRadar > 150 then config.diveRadar = 40 end
-    diveRadarBtn.Text = "  Radar: " .. config.diveRadar .. "m"
-end)
+    local swCorner = Instance.new("UICorner")
+    swCorner.CornerRadius = UDim.new(1, 0)
+    swCorner.Parent = switch
 
--- ═══ CONFIG ═══
-local scanBtn = makeBtn(configPage, "  Modo Scanner: DESLIGADO", Color3.fromRGB(80, 100, 200))
-local infoConfig = makeLabel(configPage, "  Scanner mostra objetos próximos\n  para identificar a bola.", Color3.fromRGB(150, 150, 160), 40)
-
-scanBtn.MouseButton1Click:Connect(function()
-    config.scannerMode = not config.scannerMode
-    if config.scannerMode then
-        scanBtn.Text = "  Modo Scanner: LIGADO"
-        scanBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 100)
-    else
-        scanBtn.Text = "  Modo Scanner: DESLIGADO"
-        scanBtn.BackgroundColor3 = Color3.fromRGB(80, 100, 200)
-    end
-end)
-
--- ═══════════════════════════════════════════════════════════════════
--- 🔍 DETECTOR DE BOLA (MULTI-MÉTODO)
--- ═══════════════════════════════════════════════════════════════════
-local function findBall()
-    local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil, 0, "", 0 end
-
-    local candidates = {}
-    
-    -- 1. TPS.PB
-    local tps = Workspace:FindFirstChild("TPS")
-    if tps then
-        for _, v in pairs(tps:GetDescendants()) do
-            if v:IsA("BasePart") then
-                table.insert(candidates, {part = v, source = "TPS." .. v.Name})
-            end
-        end
-    end
-
-    -- 2. lball, rball, ball, bola
-    for _, v in pairs(Workspace:GetDescendants()) do
-        if v:IsA("BasePart") then
-            local n = string.lower(v.Name)
-            if n == "lball" or n == "rball" or n:find("ball") or n:find("bola") or n:find("soccer") then
-                local isMine = char and v:IsDescendantOf(char)
-                if not isMine then
-                    local jaTem = false
-                    for _, c in ipairs(candidates) do
-                        if c.part == v then jaTem = true break end
-                    end
-                    if not jaTem then
-                        table.insert(candidates, {part = v, source = v.Name})
-                    end
-                end
-            end
-        end
-    end
-
-    -- 3. Se não achou nada, procura partes esféricas
-    if #candidates == 0 then
-        for _, v in pairs(Workspace:GetDescendants()) do
-            if v:IsA("BasePart") then
-                local isMine = char and v:IsDescendantOf(char)
-                if not isMine then
-                    local sz = v.Size
-                    local avg = (sz.X + sz.Y + sz.Z) / 3
-                    local var = math.abs(sz.X - sz.Y) + math.abs(sz.Y - sz.Z)
-                    if var < 1 and avg > 0.5 and avg < 5 then
-                        table.insert(candidates, {part = v, source = "esfera: " .. v.Name})
-                    end
-                end
-            end
-        end
-    end
-
-    local closest, closestDist, closestSource = nil, math.huge, ""
-    for _, c in ipairs(candidates) do
-        if c.part and c.part.Parent then
-            local d = (c.part.Position - hrp.Position).Magnitude
-            if d < closestDist then
-                closestDist = d
-                closest = c.part
-                closestSource = c.source
-            end
-        end
-    end
-    return closest, closestDist, closestSource, #candidates
-end
-
--- Scanner
-local function scanNearby()
-    local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return "sem player" end
-    local myPos = hrp.Position
-    local list = {}
-    for _, v in pairs(Workspace:GetDescendants()) do
-        if v:IsA("BasePart") then
-            local isMine = v:IsDescendantOf(char)
-            local isOther = false
-            for _, plr in pairs(Players:GetPlayers()) do
-                if plr ~= player and plr.Character and v:IsDescendantOf(plr.Character) then
-                    isOther = true break
-                end
-            end
-            if not isMine and not isOther then
-                table.insert(list, {name = v.Name, dist = (v.Position - myPos).Magnitude})
-            end
-        end
-    end
-    table.sort(list, function(a, b) return a.dist < b.dist end)
-    local txt = "  TOP 5:\n"
-    for i = 1, math.min(5, #list) do
-        txt = txt .. "  " .. i .. ". " .. list[i].name .. " (" .. math.floor(list[i].dist) .. "m)\n"
-    end
-    return txt
-end
-
-task.spawn(function()
-    while task.wait(0.3) do
-        if config.scannerMode then
-            ballStatus.Text = scanNearby()
-            ballStatus.TextColor3 = Color3.fromRGB(255, 220, 50)
+    local ativado = false
+    switch.MouseButton1Click:Connect(function()
+        ativado = not ativado
+        if ativado then
+            switch.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
         else
-            local ball, dist, source, total = findBall()
-            config.detectedBall = ball
-            if ball then
-                ballStatus.Text = "  🔍 Bola: " .. ball.Name .. " | " .. math.floor(dist) .. "m"
-                ballStatus.TextColor3 = Color3.fromRGB(100, 255, 100)
-            else
-                ballStatus.Text = "  🔍 Bola: não encontrada (" .. total .. ")"
-                ballStatus.TextColor3 = Color3.fromRGB(255, 100, 100)
-            end
+            switch.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
         end
+        if callback then callback(ativado) end
+    end)
+end
+
+-- =======================================================
+-- ABA GERAL
+-- =======================================================
+criarBotaoAcao(abaGeral, "⚡ TELEPORTE PARA A BOLA", function()
+    acaoTeleporte()
+end)
+
+criarToggle(abaGeral, "🤖 FOLLOW BALL", function(estado)
+    ativarFollow(estado)
+end)
+
+-- =======================================================
+-- ABA REACH
+-- =======================================================
+criarToggle(abaReach, "🎯 REACH ATIVO", function(estado)
+    ativarReach(estado)
+end)
+
+criarToggle(abaReach, "👁️ MOSTRAR ESFERA", function(estado)
+    circuloVisivel = estado
+    print("👁️ Esfera " .. (estado and "visível" or "oculta"))
+end)
+
+-- Slider título
+local sliderTitle = Instance.new("TextLabel")
+sliderTitle.Size = UDim2.new(1, -5, 0, 20)
+sliderTitle.BackgroundTransparency = 1
+sliderTitle.Text = "📏 TAMANHO DO REACH: " .. tamanhoReach
+sliderTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
+sliderTitle.Font = Enum.Font.GothamBold
+sliderTitle.TextSize = 11
+sliderTitle.TextXAlignment = Enum.TextXAlignment.Left
+sliderTitle.Parent = abaReach
+
+-- Frame do slider
+local sliderFrame = Instance.new("Frame")
+sliderFrame.Size = UDim2.new(1, -5, 0, 30)
+sliderFrame.BackgroundColor3 = Color3.fromRGB(32, 32, 40)
+sliderFrame.Parent = abaReach
+
+local sfCorner = Instance.new("UICorner")
+sfCorner.CornerRadius = UDim.new(0, 6)
+sfCorner.Parent = sliderFrame
+
+-- Barra fundo
+local barraFundo = Instance.new("Frame")
+barraFundo.Size = UDim2.new(1, -40, 0, 6)
+barraFundo.Position = UDim2.new(0, 20, 0.5, -3)
+barraFundo.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+barraFundo.BorderSizePixel = 0
+barraFundo.Parent = sliderFrame
+
+local bfCorner = Instance.new("UICorner")
+bfCorner.CornerRadius = UDim.new(1, 0)
+bfCorner.Parent = barraFundo
+
+-- Barra preenchida
+local barraFill = Instance.new("Frame")
+barraFill.Size = UDim2.new(0.5, 0, 1, 0)
+barraFill.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+barraFill.BorderSizePixel = 0
+barraFill.Parent = barraFundo
+
+local bfillCorner = Instance.new("UICorner")
+bfillCorner.CornerRadius = UDim.new(1, 0)
+bfillCorner.Parent = barraFill
+
+-- Botão do slider
+local sliderBtn = Instance.new("TextButton")
+sliderBtn.Size = UDim2.new(0, 20, 0, 20)
+sliderBtn.Position = UDim2.new(0.5, -10, 0.5, -10)
+sliderBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+sliderBtn.Text = ""
+sliderBtn.Parent = barraFundo
+
+local sbCorner = Instance.new("UICorner")
+sbCorner.CornerRadius = UDim.new(1, 0)
+sbCorner.Parent = sliderBtn
+
+-- Lógica do slider (1 a 15)
+local sliderDragging = false
+local valorMin = 1
+local valorMax = 15
+
+local function atualizarSlider(porcentagem)
+    porcentagem = math.clamp(porcentagem, 0, 1)
+    barraFill.Size = UDim2.new(porcentagem, 0, 1, 0)
+    sliderBtn.Position = UDim2.new(porcentagem, -10, 0.5, -10)
+    
+    local valor = math.floor(valorMin + (valorMax - valorMin) * porcentagem)
+    sliderTitle.Text = "📏 TAMANHO DO REACH: " .. valor
+    alterarTamanhoReach(valor)
+end
+
+sliderBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        sliderDragging = true
     end
 end)
 
--- ═══ CÍRCULO ═══
-local circle = nil
-local function createCircle()
-    if circle then circle:Destroy() end
-    circle = Instance.new("Part")
-    circle.Name = "MaritacaCircle"
-    circle.Shape = Enum.PartType.Ball
-    circle.Size = Vector3.new(config.reachSize, config.reachSize, config.reachSize)
-    circle.Anchored = true
-    circle.CanCollide = false
-    circle.Material = Enum.Material.ForceField
-    circle.Color = Color3.fromRGB(0, 255, 100)
-    circle.Transparency = 0.7
-    circle.CastShadow = false
-    circle.Parent = Workspace
-end
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        sliderDragging = false
+    end
+end)
 
--- ═══════════════════════════════════════════════════════════════════
--- ⚽ REACH (CORRIGIDO - usa BodyVelocity + CFrame)
--- ═══════════════════════════════════════════════════════════════════
-local reachConn = nil
-local function toggleReach()
-    config.reachEnabled = not config.reachEnabled
-    if config.reachEnabled then
-        reachBtn.Text = "  Reach: LIGADO"
-        reachBtn.BackgroundColor3 = Color3.fromRGB(30, 180, 80)
-        createCircle()
+UserInputService.InputChanged:Connect(function(input)
+    if sliderDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local mouseX = input.Position.X
+        local barraAbsoluta = barraFundo.AbsolutePosition.X
+        local barraLargura = barraFundo.AbsoluteSize.X
+        local porcentagem = (mouseX - barraAbsoluta) / barraLargura
+        atualizarSlider(porcentagem)
+    end
+end)
 
-        reachConn = RunService.Heartbeat:Connect(fun
+-- =======================================================
+-- ABA INFO (COM PING/LAG)
+-- =======================================================
+local infoLabel = Instance.new("TextLabel")
+infoLabel.Size = UDim2.new(1, -5, 0, 100)
+infoLabel.BackgroundColor3 = Color3.fromRGB(32, 32, 40)
+infoLabel.Text = "⚽ TPS SOCCER HUB\n\nVersão: 1.0\nBola detectada via RealMatch\n\nUse as abas ao lado!"
+infoLabel.TextColor3 = Color3.new(1, 1, 1)
+infoLabel.Font = Enum.Font.Gotham
+infoLabel.TextSize = 12
+infoLabel.TextWrapped = true
+infoLabel.Parent = abaInfo
+
+local infoCorner = Instance.new("UICorner")
+infoCorner.CornerRadius = UDim.new(0, 6)
+infoCorner.Parent = infoLabel
+
+-- Mostrador de Ping (Lag)
+local pingLabel = Instance.new("TextLabel")
+pingLabel.Size = UDim2.new(1, -5, 0, 30)
+pingLabel.BackgroundColor3 = Color3.fromRGB(32, 32, 40)
+pingLabel.Text = "📡 Ping: -- ms"
+pingLabel.TextColor3 = Color3.new(1, 1, 1)
+pingLabel.Font = Enum.Font.GothamBold
+pingLabel.TextSize = 12
+pingLabel.Parent = abaInfo
+
+local pingCorner = Instance.new("UICorner")
+pingCorner.CornerRadius = UDim.new(0, 6)
+pingCorner.Parent = pingLabel
+
+-- Loop que atualiza o ping (usando os Stats que você mandou)
+task.spawn(function()
+    while true do
+        task.wait(1)
+        
+        -- Ping do servidor (ms)
+        local ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+        local sentPackets = Stats.Network.ServerStatsItem["Sent Cluster Packets"].Size
+        local touchPackets = Stats.Network.ServerStatsItem.SentTouchPackets.Size
+        
+        pingLabel.Text = string.format("📡 Ping: %.0f ms | 📦 Pacotes: %d", ping, sentPackets)
+    end
+end)
+
+-- =======================================================
+-- RESET AO MORRER
+-- =======================================================
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+    humanoidRootPart = newChar:WaitForChil
