@@ -1,606 +1,535 @@
--- =======================================================
--- SCRIPT THE CLASSIC SOCCER - PAINEL FLUENT + REACH ESFERA
--- TP + REACH + FOLLOW + Esfera de Alcance
--- =======================================================
+-- ======================================================
+-- MARITACA HUB - Futebol Clássico (COMPLETO)
+-- Versão: 32.0 - Auto Dive com restauração de estado
+-- ======================================================
 
-print("=== SCRIPT INICIANDO ===")
+print("=== [1/5] INICIANDO ===")
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Stats = game:GetService("Stats")
-local player = Players.LocalPlayer
+local StarterGui = game:GetService("StarterGui")
+local Debris = game:GetService("Debris")
+local LocalPlayer = Players.LocalPlayer
 
-local character = player.Character or player.CharacterAdded:Wait()
+local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 local humanoid = character:WaitForChild("Humanoid")
 
--- Estados
+print("=== [2/5] CARREGANDO FLUENT ===")
+
+local Fluent
+local sucesso = pcall(function()
+    Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+end)
+
+if not sucesso or not Fluent then
+    pcall(function()
+        Fluent = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/main.lua"))()
+    end)
+end
+
+if not Fluent then
+    warn("❌ NÃO FOI POSSÍVEL CARREGAR O FLUENT.")
+    return
+end
+
+print("=== [3/5] FLUENT CARREGADO ===")
+
+local Window = Fluent:CreateWindow({
+    Title = "Maritaca Hub | Futebol Clássico",
+    SubTitle = "by Maritaca",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 500),
+    Acrylic = false,
+    Theme = "Darker",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+    Reach = Window:AddTab({ Title = "Reach", Icon = "target" }),
+    AutoBall = Window:AddTab({ Title = "AutoBall", Icon = "circle" }),
+    GK = Window:AddTab({ Title = "GK", Icon = "shield" }),
+    FPS = Window:AddTab({ Title = "FPS", Icon = "monitor" }),
+    SkinBall = Window:AddTab({ Title = "SkinBall", Icon = "disc" }),
+    Opcoes = Window:AddTab({ Title = "Configurações", Icon = "settings" })
+}
+
+print("=== [4/5] ABAS CRIADAS ===")
+
+-- ==================== VARIÁVEIS ====================
 local seguindo = false
+local followPausado = false
+local tempoParado = 0
 local reachAtivo = false
 local circuloVisivel = true
-local tamanhoReach = 8 -- Padrão (1 a 15)
+local chuteAutomatico = true
+local forcaChute = 80
+local tamanhoReach = 8
 local circulo = nil
-local conexaoCirculo = nil
+local conexaoReach = nil
+local conexaoFollow = nil
+local fpsAtivo = false
+local tpLoopAtivo = false
+local conexaoTPLoop = nil
+local idTexturaPersonalizado = ""
+local autoDiveAtivo = false
+local autoCatchAtivo = false
+local conexaoAutoDive = nil
+local conexaoAutoCatch = nil
+local ultimaDefesa = 0
+local distanciaDive = 60
+local distanciaCatch = 5
+local jaAgarrou = false
+local tempoAgarrou = 0
+local TEXTURA_CHAMPIONS = 6631377470
+local screenGui = nil
+local fechado = false
+local toolManagementCache = nil
+local estadoOriginalSalvo = nil
 
--- =======================================================
--- PEGAR A BOLA OFICIAL (SÓ RealMatch)
--- =======================================================
-local function obterPosicaoBola()
+-- ==================== FECHAR ====================
+local function fecharScript()
+    if fechado then return end
+    fechado = true
+    print("=== FECHANDO ===")
+    if conexaoReach then pcall(function() conexaoReach:Disconnect() end) end
+    if conexaoFollow then pcall(function() conexaoFollow:Disconnect() end) end
+    if conexaoTPLoop then pcall(function() conexaoTPLoop:Disconnect() end) end
+    if conexaoAutoDive then pcall(function() conexaoAutoDive:Disconnect() end) end
+    if conexaoAutoCatch then pcall(function() conexaoAutoCatch:Disconnect() end) end
+    if circulo then pcall(function() circulo:Destroy() end) end
+    pcall(function()
+        for _, obj in ipairs(workspace:GetChildren()) do
+            if obj.Name == "ReachVisual" then obj:Destroy() end
+        end
+    end)
+    if humanoid then
+        pcall(function() humanoid:Move(Vector3.new(0,0,0), false) end)
+        pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+    end
+    if screenGui and screenGui.Parent then pcall(function() screenGui:Destroy() end) end
+    pcall(function() Window:Destroy() end)
+    seguindo = false
+    reachAtivo = false
+    tpLoopAtivo = false
+    followPausado = false
+    print("=== FECHADO ===")
+end
+
+-- ==================== PEGAR BOLA ====================
+local function obterBolaOficial()
+    local ss = workspace:FindFirstChild("WorkspaceStadiumSounds")
+    if ss then
+        local tps = ss:FindFirstChild("TPS")
+        if tps then
+            if tps:IsA("BasePart") then return tps end
+            if tps:IsA("Model") then
+                if tps.PrimaryPart then return tps.PrimaryPart end
+                for _, f in ipairs(tps:GetDescendants()) do
+                    if f:IsA("BasePart") then return f end
+                end
+            end
+            for _, f in ipairs(tps:GetDescendants()) do
+                if f:IsA("BasePart") then return f end
+            end
+        end
+    end
     for _, obj in ipairs(workspace:GetDescendants()) do
         local rm = obj:FindFirstChild("RealMatch")
         if rm and (rm.Value == true or rm.Value == 1) then
-            if obj:IsA("BasePart") then
-                return obj.Position
-            elseif obj:IsA("Model") then
-                if obj.PrimaryPart then
-                    return obj.PrimaryPart.Position
+            if obj:IsA("BasePart") then return obj
+            elseif obj:IsA("Model") and obj.PrimaryPart then return obj.PrimaryPart end
+        end
+    end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local n = obj.Name:lower()
+            local t = obj.Size.Magnitude
+            if t > 0.5 and t < 5 then
+                if n == "tps" or n == "pb" or n == "ball" or n == "bola" or n == "soccerball" or n == "football" then
+                    return obj
                 end
-                local ok, pivot = pcall(function() return obj:GetPivot().Position end)
-                if ok then return pivot end
             end
         end
     end
     return nil
 end
 
--- =======================================================
--- ANIMAÇÃO
--- =======================================================
-local function tocarAnimacaoAndar()
-    local client = ReplicatedStorage:FindFirstChild("Client")
-    if client then
-        client:FireServer("NoobGlitch")
+local function obterPosBola()
+    local b = obterBolaOficial()
+    if b then return b.Position end
+    return nil
+end
+
+local function tocarAnimacao()
+    local c = ReplicatedStorage:FindFirstChild("Client")
+    if c then c:FireServer("NoobGlitch") end
+end
+
+-- ==================== TOOLMANAGEMENT ====================
+local function obterToolManagement()
+    if toolManagementCache then return toolManagementCache end
+    local player = game:GetService("Players").LocalPlayer
+    local backpack = player:FindFirstChild("Backpack")
+    local char = player.Character
+    local modulo = nil
+    if backpack then modulo = backpack:FindFirstChild("ToolManagement") end
+    if not modulo and char then modulo = char:FindFirstChild("ToolManagement") end
+    if modulo then
+        local ok, resultado = pcall(function() return require(modulo) end)
+        if ok and resultado then
+            toolManagementCache = resultado
+            print("✅ ToolManagement carregado!")
+            return resultado
+        end
+    end
+    return nil
+end
+
+-- ==================== APLICAR TEXTURA ====================
+local function aplicarTexturaBola(id)
+    local aplicado = false
+    local ss = workspace:FindFirstChild("WorkspaceStadiumSounds")
+    if ss then
+        local tps = ss:FindFirstChild("TPS")
+        if tps then
+            if tps:IsA("BasePart") and tps:FindFirstChild("Texture") then
+                local tex = tps:FindFirstChild("Texture")
+                if tex:IsA("Decal") or tex:IsA("Texture") then
+                    tex.Texture = "rbxassetid://" .. id
+                    aplicado = true
+                end
+            end
+            if not aplicado and (tps:IsA("Decal") or tps:IsA("Texture")) then
+                tps.Texture = "rbxassetid://" .. id
+                aplicado = true
+            end
+            if not aplicado then
+                for _, f in ipairs(tps:GetDescendants()) do
+                    if f:IsA("Texture") or f:IsA("Decal") then
+                        f.Texture = "rbxassetid://" .. id
+                        aplicado = true
+                        break
+                    end
+                end
+            end
+        end
+    end
+    if not aplicado then
+        local b = obterBolaOficial()
+        if b then
+            if b:IsA("MeshPart") then
+                b.TextureID = "rbxassetid://" .. id
+                aplicado = true
+            else
+                local mesh = b:FindFirstChildOfClass("SpecialMesh")
+                if mesh then
+                    mesh.TextureId = "rbxassetid://" .. id
+                    aplicado = true
+                end
+            end
+        end
+    end
+    return aplicado
+end
+
+-- ==================== TP ====================
+local function acaoTP()
+    local pos = obterPosBola()
+    if pos then
+        humanoidRootPart.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
+        Fluent:Notify({ Title = "⚡ TP", Content = "Teleportado!", Duration = 2 })
+    else
+        Fluent:Notify({ Title = "❌ Erro", Content = "Bola não encontrada.", Duration = 3 })
     end
 end
 
--- =======================================================
--- ESFERA DE ALCANCE (VISUAL - ENVOLVE O CORPO)
--- =======================================================
-local function criarCirculo()
-    if circulo and circulo.Parent then
-        circulo:Destroy()
+-- ==================== TP LOOP ====================
+local function iniciarTPLoop()
+    if conexaoTPLoop then conexaoTPLoop:Disconnect() end
+    conexaoTPLoop = RunService.Heartbeat:Connect(function()
+        if not tpLoopAtivo then return end
+        local pos = obterPosBola()
+        if not pos then return end
+        local c = LocalPlayer.Character
+        if not c then return end
+        local root = c:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        root.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
+    end)
+    Fluent:Notify({ Title = "🔁 TP Loop", Content = "ATIVADO!", Duration = 2 })
+end
+
+local function pararTPLoop()
+    tpLoopAtivo = false
+    if conexaoTPLoop then conexaoTPLoop:Disconnect() conexaoTPLoop = nil end
+    Fluent:Notify({ Title = "🔁 TP Loop", Content = "Desativado.", Duration = 2 })
+end
+
+-- ==================== FOLLOW ====================
+local function ativarFollow(estado)
+    seguindo = estado
+    followPausado = false
+    tempoParado = 0
+    if seguindo then
+        if conexaoFollow then conexaoFollow:Disconnect() end
+        conexaoFollow = RunService.RenderStepped:Connect(function(dt)
+            if not seguindo then return end
+            local c = LocalPlayer.Character
+            if not c then return end
+            local hum = c:FindFirstChild("Humanoid")
+            local root = c:FindFirstChild("HumanoidRootPart")
+            if not hum or not root then return end
+            if hum.MoveDirection.Magnitude > 0.3 then
+                followPausado = true
+                tempoParado = 0
+                return
+            end
+            if followPausado then
+                tempoParado = tempoParado + dt
+                if tempoParado >= 0.5 then followPausado = false else return end
+            end
+            local pos = obterPosBola()
+            if not pos then return end
+            local dir = Vector3.new(pos.X - root.Position.X, 0, pos.Z - root.Position.Z)
+            if dir.Magnitude < 1.5 then return end
+            hum:Move(dir.Unit, false)
+            tocarAnimacao()
+        end)
+        Fluent:Notify({ Title = "🤖 Follow", Content = "Ativado!", Duration = 2 })
+    else
+        if conexaoFollow then conexaoFollow:Disconnect() conexaoFollow = nil end
+        local c = LocalPlayer.Character
+        if c then
+            local hum = c:FindFirstChild("Humanoid")
+            local root = c:FindFirstChild("HumanoidRootPart")
+            if hum and root then pcall(function() hum:MoveTo(root.Position) end) end
+        end
+        Fluent:Notify({ Title = "🛑 Follow", Content = "Desativado.", Duration = 2 })
     end
-    
-    -- Esfera ao redor do personagem
+end
+
+-- ==================== REACH ====================
+local function limparReach()
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if obj.Name == "ReachVisual" then obj:Destroy() end
+    end
+end
+
+local function criarCirculo()
+    limparReach()
+    if conexaoReach then conexaoReach:Disconnect() conexaoReach = nil end
+    local c = LocalPlayer.Character
+    local hrp = c and c:FindFirstChild("HumanoidRootPart")
+    local posIni = hrp and hrp.Position or Vector3.new(0,0,0)
     circulo = Instance.new("Part")
-    circulo.Name = "ReachSphere"
+    circulo.Name = "ReachVisual"
     circulo.Shape = Enum.PartType.Ball
-    circulo.Size = Vector3.new(tamanhoReach * 2, tamanhoReach * 2, tamanhoReach * 2)
+    circulo.Size = Vector3.new(tamanhoReach*2, tamanhoReach*2, tamanhoReach*2)
+    circulo.CFrame = CFrame.new(posIni)
     circulo.Anchored = true
     circulo.CanCollide = false
     circulo.CanQuery = false
     circulo.CanTouch = false
-    circulo.Material = Enum.Material.Neon
-    circulo.Color = Color3.fromRGB(0, 255, 100) -- VERDE (igual ao print)
-    circulo.Transparency = 0.85 -- Bem transparente pra não atrapalhar a visão
+    circulo.Material = Enum.Material.SmoothPlastic
+    circulo.Color = Color3.fromRGB(0, 255, 150)
+    circulo.Transparency = 0.8
     circulo.Parent = workspace
-    
-    -- Inicia o loop que atualiza a posição da esfera
-    if conexaoCirculo then
-        conexaoCirculo:Disconnect()
-    end
-    
-    conexaoCirculo = RunService.RenderStepped:Connect(function()
+    conexaoReach = RunService.Heartbeat:Connect(function()
         if not circulo or not circulo.Parent then return end
-        if not humanoidRootPart then return end
-        
-        -- Centraliza a esfera no HumanoidRootPart (meio do corpo)
-        local posPlayer = humanoidRootPart.Position
-        circulo.CFrame = CFrame.new(posPlayer)
-        
-        -- Visibilidade
-        circulo.Transparency = circuloVisivel and 0.85 or 1
+        local ch = LocalPlayer.Character
+        if not ch then return end
+        local root = ch:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        circulo.CFrame = CFrame.new(root.Position)
+        circulo.Transparency = circuloVisivel and 0.8 or 1
+        local b = obterBolaOficial()
+        if b then
+            local d = (b.Position - root.Position).Magnitude
+            if d <= tamanhoReach and chuteAutomatico then
+                local dir = root.CFrame.LookVector
+                b.AssemblyLinearVelocity = Vector3.new(dir.X * forcaChute, 15, dir.Z * forcaChute)
+            end
+        end
     end)
-end
-
-local function atualizarCirculo()
-    if circulo then
-        circulo.Size = Vector3.new(tamanhoReach * 2, tamanhoReach * 2, tamanhoReach * 2)
-    end
-end
-
-local function removerCirculo()
-    if conexaoCirculo then
-        conexaoCirculo:Disconnect()
-        conexaoCirculo = nil
-    end
-    if circulo then
-        circulo:Destroy()
-        circulo = nil
-    end
-end
-
--- =======================================================
--- FUNÇÕES DE AÇÃO
--- =======================================================
-local function acaoTeleporte()
-    local posBola = obterPosicaoBola()
-    if posBola then
-        humanoidRootPart.CFrame = CFrame.new(posBola + Vector3.new(0, 3, 0))
-        print("⚡ Teleportado para a bola oficial!")
-    else
-        warn("❌ Bola oficial não encontrada (RealMatch != true)")
-    end
-end
-
-local conexaoFollow = nil
-
-local function ativarFollow(estado)
-    seguindo = estado
-    
-    if seguindo then
-        conexaoFollow = RunService.RenderStepped:Connect(function()
-            if not seguindo then return end
-            
-            local posBola = obterPosicaoBola()
-            if not posBola or not humanoidRootPart or not humanoid then return end
-            
-            local posPlayer = humanoidRootPart.Position
-            local direcao = Vector3.new(
-                posBola.X - posPlayer.X,
-                0,
-                posBola.Z - posPlayer.Z
-            )
-            
-            local distancia = direcao.Magnitude
-            if distancia < 1.5 then return end
-            
-            local dirNormalizada = direcao.Unit
-            humanoid:Move(dirNormalizada, false)
-            tocarAnimacaoAndar()
-        end)
-        print("=== FOLLOW ATIVADO ===")
-    else
-        if conexaoFollow then
-            conexaoFollow:Disconnect()
-            conexaoFollow = nil
-        end
-        if humanoid then
-            humanoid:Move(Vector3.new(0, 0, 0), false)
-        end
-        print("=== FOLLOW DESATIVADO ===")
-    end
 end
 
 local function ativarReach(estado)
     reachAtivo = estado
     if reachAtivo then
-        -- Hitbox do reach (só chão)
-        humanoidRootPart.Size = Vector3.new(tamanhoReach, 2, tamanhoReach)
-        humanoidRootPart.Transparency = 0.5
         criarCirculo()
-        print("🎯 Reach ativado! (" .. tamanhoReach .. ")")
+        Fluent:Notify({ Title = "🎯 Reach", Content = "Ativado! (" .. tamanhoReach .. ")", Duration = 2 })
     else
-        humanoidRootPart.Size = Vector3.new(2, 2, 1)
-        humanoidRootPart.Transparency = 1
-        removerCirculo()
-        print("🎯 Reach desativado")
+        if conexaoReach then conexaoReach:Disconnect() conexaoReach = nil end
+        if circulo then circulo:Destroy() circulo = nil end
+        limparReach()
+        Fluent:Notify({ Title = "🎯 Reach", Content = "Desativado.", Duration = 2 })
     end
 end
 
-local function alterarTamanhoReach(novoTamanho)
-    tamanhoReach = novoTamanho
-    if reachAtivo then
-        humanoidRootPart.Size = Vector3.new(tamanhoReach, 2, tamanhoReach)
-        atualizarCirculo()
-    end
-    print("📏 Tamanho do reach: " .. tamanhoReach)
-end
-
--- =======================================================
--- ScreenGui Principal
--- =======================================================
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "FluentStyleGui"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = player:WaitForChild("PlayerGui")
-
--- =======================================================
--- BOTÃO FLUTUANTE (SATURNO)
--- =======================================================
-local toggleBtn = Instance.new("TextButton")
-toggleBtn.Name = "MinimizeButton"
-toggleBtn.Size = UDim2.new(0, 50, 0, 50)
-toggleBtn.Position = UDim2.new(0.02, 0, 0.2, 0)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
-toggleBtn.Text = "🪐"
-toggleBtn.TextSize = 26
-toggleBtn.Parent = screenGui
-
-local btnCorner = Instance.new("UICorner")
-btnCorner.CornerRadius = UDim.new(1, 0)
-btnCorner.Parent = toggleBtn
-
-local btnStroke = Instance.new("UIStroke")
-btnStroke.Color = Color3.fromRGB(0, 170, 255)
-btnStroke.Thickness = 2
-btnStroke.Parent = toggleBtn
-
--- =======================================================
--- JANELA PRINCIPAL
--- =======================================================
-local mainFrame = Instance.new("Frame")
-mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 480, 0, 360)
-mainFrame.Position = UDim2.new(0.5, -240, 0.5, -180)
-mainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
-mainFrame.BorderSizePixel = 0
-mainFrame.Visible = true
-mainFrame.Parent = screenGui
-
-local mainCorner = Instance.new("UICorner")
-mainCorner.CornerRadius = UDim.new(0, 10)
-mainCorner.Parent = mainFrame
-
-local mainStroke = Instance.new("UIStroke")
-mainStroke.Color = Color3.fromRGB(45, 45, 55)
-mainStroke.Thickness = 1
-mainStroke.Parent = mainFrame
-
-toggleBtn.MouseButton1Click:Connect(function()
-    mainFrame.Visible = not mainFrame.Visible
-end)
-
--- Arrastar
-local function tornarArrastavel(frame)
-    local dragging, dragInput, dragStart, startPos
-    
-    frame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = frame.Position
-            
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
+-- ==================== GK - AUTO DIVE (COM RESTAURAÇÃO DE ESTADO) ====================
+local function iniciarAutoDive()
+    if conexaoAutoDive then conexaoAutoDive:Disconnect() end
+    conexaoAutoDive = RunService.Heartbeat:Connect(function()
+        if not autoDiveAtivo then return end
+        
+        local agora = tick()
+        if agora - ultimaDefesa < 0.8 then return end
+        
+        local bola = obterBolaOficial()
+        if not bola then return end
+        
+        local c = LocalPlayer.Character
+        if not c then return end
+        local root = c:FindFirstChild("HumanoidRootPart")
+        local hum = c:FindFirstChild("Humanoid")
+        if not root or not hum then return end
+        
+        -- 1️⃣ DISTÂNCIA
+        local dist = (bola.Position - root.Position).Magnitude
+        if dist > distanciaDive then return end
+        
+        -- 2️⃣ VELOCIDADE
+        local velocidadeBola = bola.AssemblyLinearVelocity
+        if velocidadeBola.Magnitude < 10 then return end
+        
+        -- 3️⃣ DIREÇÃO
+        local direcaoBola = velocidadeBola.Unit
+        local paraGoleiro = (root.Position - bola.Position).Unit
+        local dotProduto = direcaoBola:Dot(paraGoleiro)
+        if dotProduto < 0.3 then return end
+        
+        -- 4️⃣ POSIÇÃO RELATIVA
+        local bolaRelativa = root.CFrame:PointToObjectSpace(bola.Position)
+        local ladoDireita = bolaRelativa.X > 0
+        local altura = bolaRelativa.Y
+        
+        -- 5️⃣ SALVA O ESTADO ORIGINAL E MUDA PRA PHYSICS
+        local estadoOriginal = hum:GetState()
+        pcall(function() hum:ChangeState(Enum.HumanoidStateType.Physics) end)
+        
+        -- 6️⃣ TOOLMANAGEMENT
+        local tm = obterToolManagement()
+        if tm then
+            pcall(function() tm.SetUsing(true) end)
+            pcall(function() tm.Slowdown() end)
+            local torso = c:FindFirstChild("Torso")
+            if torso then
+                pcall(function() torso.AssemblyAngularVelocity = Vector3.new() end)
+            end
+        end
+        
+        -- 7️⃣ ANIMAÇÃO
+        local animAnimations = ReplicatedStorage:FindFirstChild("Animations")
+        local gkAnim = animAnimations and animAnimations:FindFirstChild("GK")
+        local dives = gkAnim and gkAnim:FindFirstChild("Dives")
+        
+        local animacao = nil
+        if dives then
+            if altura > 2 then
+                animacao = ladoDireita and dives:FindFirstChild("HighDive_R") or dives:FindFirstChild("HighDive_L")
+                if not animacao then
+                    animacao = dives:FindFirstChild("HighDive_L") or dives:FindFirstChild("HighDive_R")
                 end
+            elseif altura < 0.5 then
+                animacao = ladoDireita and dives:FindFirstChild("LowDive_R") or dives:FindFirstChild("LowDive_L")
+                if not animacao then
+                    animacao = dives:FindFirstChild("MidDive_L") or dives:FindFirstChild("MidDive_R")
+                end
+            else
+                animacao = ladoDireita and dives:FindFirstChild("MidDive_R") or dives:FindFirstChild("MidDive_L")
+            end
+            
+            if animacao then
+                local animator = hum:FindFirstChildOfClass("Animator")
+                if animator then
+                    local track = animator:LoadAnimation(animacao)
+                    track.Priority = Enum.AnimationPriority.Action4
+                    pcall(function() track:Play() end)
+                    print("🎬 Animação: " .. animacao.Name)
+                end
+            end
+        end
+        
+        -- 8️⃣ BODYVELOCITY COM FORÇA REAL
+        local bodyVelocity = Instance.new("BodyVelocity")
+        bodyVelocity.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+        local forcaLateral = ladoDireita and 35 or -35
+        local forcaAltura = (altura > 2) and 25 or 12
+        bodyVelocity.Velocity = (root.CFrame.RightVector * forcaLateral) 
+                              + (root.CFrame.UpVector * forcaAltura) 
+                              + (root.CFrame.LookVector * 10)
+        bodyVelocity.Parent = root
+        Debris:AddItem(bodyVelocity, 0.5)
+        
+        -- 9️⃣ APLICA FORÇA NA BOLA E RAGDOLL
+        if tm then
+            pcall(function() tm.ApplyGKForce(bola) end)
+            task.delay(0.6, function()
+                pcall(function() tm.Ragdoll() end)
             end)
         end
-    end)
-
-    frame.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            local delta = input.Position - dragStart
-            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end)
-end
-
-tornarArrastavel(toggleBtn)
-tornarArrastavel(mainFrame)
-
--- =======================================================
--- BARRA LATERAL
--- =======================================================
-local sideBar = Instance.new("Frame")
-sideBar.Name = "SideBar"
-sideBar.Size = UDim2.new(0, 130, 1, 0)
-sideBar.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-sideBar.BorderSizePixel = 0
-sideBar.Parent = mainFrame
-
-local sideCorner = Instance.new("UICorner")
-sideCorner.CornerRadius = UDim.new(0, 10)
-sideCorner.Parent = sideBar
-
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 40)
-title.BackgroundTransparency = 1
-title.Text = "⚽ TPS SOCCER"
-title.TextColor3 = Color3.new(1, 1, 1)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 13
-title.Parent = sideBar
-
-local tabContainer = Instance.new("Frame")
-tabContainer.Size = UDim2.new(1, -10, 1, -50)
-tabContainer.Position = UDim2.new(0, 5, 0, 45)
-tabContainer.BackgroundTransparency = 1
-tabContainer.Parent = sideBar
-
-local tabLayout = Instance.new("UIListLayout")
-tabLayout.Padding = UDim.new(0, 5)
-tabLayout.Parent = tabContainer
-
-local contentFrame = Instance.new("Frame")
-contentFrame.Name = "ContentFrame"
-contentFrame.Size = UDim2.new(1, -140, 1, -20)
-contentFrame.Position = UDim2.new(0, 135, 0, 10)
-contentFrame.BackgroundTransparency = 1
-contentFrame.Parent = mainFrame
-
--- Sistema de Abas
-local paginas = {}
-
-local function criarAba(nome, id)
-    local btnTab = Instance.new("TextButton")
-    btnTab.Size = UDim2.new(1, 0, 0, 32)
-    btnTab.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
-    btnTab.Text = "  " .. nome
-    btnTab.TextColor3 = Color3.fromRGB(200, 200, 200)
-    btnTab.Font = Enum.Font.GothamMedium
-    btnTab.TextSize = 12
-    btnTab.TextXAlignment = Enum.TextXAlignment.Left
-    btnTab.Parent = tabContainer
-
-    local tabCorner = Instance.new("UICorner")
-    tabCorner.CornerRadius = UDim.new(0, 6)
-    tabCorner.Parent = btnTab
-
-    local page = Instance.new("ScrollingFrame")
-    page.Name = id .. "Page"
-    page.Size = UDim2.new(1, 0, 1, 0)
-    page.BackgroundTransparency = 1
-    page.Visible = false
-    page.ScrollBarThickness = 2
-    page.Parent = contentFrame
-
-    local pageLayout = Instance.new("UIListLayout")
-    pageLayout.Padding = UDim.new(0, 8)
-    pageLayout.Parent = page
-
-    paginas[id] = {btn = btnTab, frame = page}
-
-    btnTab.MouseButton1Click:Connect(function()
-        for _, v in pairs(paginas) do
-            v.frame.Visible = false
-            v.btn.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
-            v.btn.TextColor3 = Color3.fromRGB(200, 200, 200)
-        end
-        page.Visible = true
-        btnTab.BackgroundColor3 = Color3.fromRGB(45, 45, 58)
-        btnTab.TextColor3 = Color3.new(1, 1, 1)
-    end)
-
-    return page
-end
-
-local abaGeral = criarAba("Geral", "Geral")
-local abaReach = criarAba("Reach", "Reach")
-local abaInfo = criarAba("Info", "Info")
-
-paginas["Geral"].frame.Visible = true
-paginas["Geral"].btn.BackgroundColor3 = Color3.fromRGB(45, 45, 58)
-
--- =======================================================
--- COMPONENTES
--- =======================================================
-local function criarBotaoAcao(pagina, texto, callback)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, -5, 0, 38)
-    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-    btn.Text = texto
-    btn.TextColor3 = Color3.new(1, 1, 1)
-    btn.Font = Enum.Font.GothamMedium
-    btn.TextSize = 13
-    btn.Parent = pagina
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = btn
-
-    btn.MouseButton1Click:Connect(function()
-        if callback then callback() end
-    end)
-end
-
-local function criarToggle(pagina, texto, callback)
-    local toggleFrame = Instance.new("Frame")
-    toggleFrame.Size = UDim2.new(1, -5, 0, 38)
-    toggleFrame.BackgroundColor3 = Color3.fromRGB(32, 32, 40)
-    toggleFrame.Parent = pagina
-
-    local tfCorner = Instance.new("UICorner")
-    tfCorner.CornerRadius = UDim.new(0, 6)
-    tfCorner.Parent = toggleFrame
-
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(0.7, 0, 1, 0)
-    label.Position = UDim2.new(0, 10, 0, 0)
-    label.BackgroundTransparency = 1
-    label.Text = texto
-    label.TextColor3 = Color3.new(1, 1, 1)
-    label.Font = Enum.Font.Gotham
-    label.TextSize = 12
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Parent = toggleFrame
-
-    local switch = Instance.new("TextButton")
-    switch.Size = UDim2.new(0, 36, 0, 18)
-    switch.Position = UDim2.new(1, -45, 0.5, -9)
-    switch.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
-    switch.Text = ""
-    switch.Parent = toggleFrame
-
-    local swCorner = Instance.new("UICorner")
-    swCorner.CornerRadius = UDim.new(1, 0)
-    swCorner.Parent = switch
-
-    local ativado = false
-    switch.MouseButton1Click:Connect(function()
-        ativado = not ativado
-        if ativado then
-            switch.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-        else
-            switch.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
-        end
-        if callback then callback(ativado) end
-    end)
-end
-
--- =======================================================
--- ABA GERAL
--- =======================================================
-criarBotaoAcao(abaGeral, "⚡ TELEPORTE PARA A BOLA", function()
-    acaoTeleporte()
-end)
-
-criarToggle(abaGeral, "🤖 FOLLOW BALL", function(estado)
-    ativarFollow(estado)
-end)
-
--- =======================================================
--- ABA REACH
--- =======================================================
-criarToggle(abaReach, "🎯 REACH ATIVO", function(estado)
-    ativarReach(estado)
-end)
-
-criarToggle(abaReach, "👁️ MOSTRAR ESFERA", function(estado)
-    circuloVisivel = estado
-    print("👁️ Esfera " .. (estado and "visível" or "oculta"))
-end)
-
--- Slider título
-local sliderTitle = Instance.new("TextLabel")
-sliderTitle.Size = UDim2.new(1, -5, 0, 20)
-sliderTitle.BackgroundTransparency = 1
-sliderTitle.Text = "📏 TAMANHO DO REACH: " .. tamanhoReach
-sliderTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
-sliderTitle.Font = Enum.Font.GothamBold
-sliderTitle.TextSize = 11
-sliderTitle.TextXAlignment = Enum.TextXAlignment.Left
-sliderTitle.Parent = abaReach
-
--- Frame do slider
-local sliderFrame = Instance.new("Frame")
-sliderFrame.Size = UDim2.new(1, -5, 0, 30)
-sliderFrame.BackgroundColor3 = Color3.fromRGB(32, 32, 40)
-sliderFrame.Parent = abaReach
-
-local sfCorner = Instance.new("UICorner")
-sfCorner.CornerRadius = UDim.new(0, 6)
-sfCorner.Parent = sliderFrame
-
--- Barra fundo
-local barraFundo = Instance.new("Frame")
-barraFundo.Size = UDim2.new(1, -40, 0, 6)
-barraFundo.Position = UDim2.new(0, 20, 0.5, -3)
-barraFundo.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-barraFundo.BorderSizePixel = 0
-barraFundo.Parent = sliderFrame
-
-local bfCorner = Instance.new("UICorner")
-bfCorner.CornerRadius = UDim.new(1, 0)
-bfCorner.Parent = barraFundo
-
--- Barra preenchida
-local barraFill = Instance.new("Frame")
-barraFill.Size = UDim2.new(0.5, 0, 1, 0)
-barraFill.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-barraFill.BorderSizePixel = 0
-barraFill.Parent = barraFundo
-
-local bfillCorner = Instance.new("UICorner")
-bfillCorner.CornerRadius = UDim.new(1, 0)
-bfillCorner.Parent = barraFill
-
--- Botão do slider
-local sliderBtn = Instance.new("TextButton")
-sliderBtn.Size = UDim2.new(0, 20, 0, 20)
-sliderBtn.Position = UDim2.new(0.5, -10, 0.5, -10)
-sliderBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-sliderBtn.Text = ""
-sliderBtn.Parent = barraFundo
-
-local sbCorner = Instance.new("UICorner")
-sbCorner.CornerRadius = UDim.new(1, 0)
-sbCorner.Parent = sliderBtn
-
--- Lógica do slider (1 a 15)
-local sliderDragging = false
-local valorMin = 1
-local valorMax = 15
-
-local function atualizarSlider(porcentagem)
-    porcentagem = math.clamp(porcentagem, 0, 1)
-    barraFill.Size = UDim2.new(porcentagem, 0, 1, 0)
-    sliderBtn.Position = UDim2.new(porcentagem, -10, 0.5, -10)
-    
-    local valor = math.floor(valorMin + (valorMax - valorMin) * porcentagem)
-    sliderTitle.Text = "📏 TAMANHO DO REACH: " .. valor
-    alterarTamanhoReach(valor)
-end
-
-sliderBtn.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        sliderDragging = true
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        sliderDragging = false
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if sliderDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local mouseX = input.Position.X
-        local barraAbsoluta = barraFundo.AbsolutePosition.X
-        local barraLargura = barraFundo.AbsoluteSize.X
-        local porcentagem = (mouseX - barraAbsoluta) / barraLargura
-        atualizarSlider(porcentagem)
-    end
-end)
-
--- =======================================================
--- ABA INFO (COM PING/LAG)
--- =======================================================
-local infoLabel = Instance.new("TextLabel")
-infoLabel.Size = UDim2.new(1, -5, 0, 100)
-infoLabel.BackgroundColor3 = Color3.fromRGB(32, 32, 40)
-infoLabel.Text = "⚽ TPS SOCCER HUB\n\nVersão: 1.0\nBola detectada via RealMatch\n\nUse as abas ao lado!"
-infoLabel.TextColor3 = Color3.new(1, 1, 1)
-infoLabel.Font = Enum.Font.Gotham
-infoLabel.TextSize = 12
-infoLabel.TextWrapped = true
-infoLabel.Parent = abaInfo
-
-local infoCorner = Instance.new("UICorner")
-infoCorner.CornerRadius = UDim.new(0, 6)
-infoCorner.Parent = infoLabel
-
--- Mostrador de Ping (Lag)
-local pingLabel = Instance.new("TextLabel")
-pingLabel.Size = UDim2.new(1, -5, 0, 30)
-pingLabel.BackgroundColor3 = Color3.fromRGB(32, 32, 40)
-pingLabel.Text = "📡 Ping: -- ms"
-pingLabel.TextColor3 = Color3.new(1, 1, 1)
-pingLabel.Font = Enum.Font.GothamBold
-pingLabel.TextSize = 12
-pingLabel.Parent = abaInfo
-
-local pingCorner = Instance.new("UICorner")
-pingCorner.CornerRadius = UDim.new(0, 6)
-pingCorner.Parent = pingLabel
-
--- Loop que atualiza o ping (usando os Stats que você mandou)
-task.spawn(function()
-    while true do
-        task.wait(1)
         
-        -- Ping do servidor (ms)
-        local ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-        local sentPackets = Stats.Network.ServerStatsItem["Sent Cluster Packets"].Size
-        local touchPackets = Stats.Network.ServerStatsItem.SentTouchPackets.Size
+        -- 🔟 RESTAURA O ESTADO (evita trava permanente)
+        task.delay(1.5, function()
+            pcall(function()
+                if hum and hum.Parent then
+                    hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+                    task.wait(0.3)
+                    hum:ChangeState(Enum.HumanoidStateType.Running)
+                end
+            end)
+        end)
         
-        pingLabel.Text = string.format("📡 Ping: %.0f ms | 📦 Pacotes: %d", ping, sentPackets)
-    end
-end)
+        ultimaDefesa = agora
+        print("🧤 Auto Dive! Lado: " .. (ladoDireita and "Direita" or "Esquerda") .. " | Altura: " .. string.format("%.1f", altura))
+    end)
+end
 
--- =======================================================
--- RESET AO MORRER
--- =======================================================
-player.CharacterAdded:Connect(function(newChar)
-    character = newChar
-    humanoidRootPart = newChar:WaitForChil
+local function pararAutoDive()
+    if conexaoAutoDive then conexaoAutoDive:Disconnect() conexaoAutoDive = nil end
+end
+
+-- ==================== GK - AUTO CATCH (PEGA SÓ UMA VEZ) ====================
+local function iniciarAutoCatch()
+    if conexaoAutoCatch then conexaoAutoCatch:Disconnect() end
+    jaAgarrou = false
+    conexaoAutoCatch = RunService.Heartbeat:Connect(function()
+        if not autoCatchAtivo then return end
+        
+        local agora = tick()
+        
+        if jaAgarrou then
+            if agora - tempoAgarrou < 3 then return end
+            jaAgarrou = false
+        end
+        
+        if agora - ultimaDefesa < 0.3 then return end
+        
+        local b = obterBolaOficial()
+        if not b then return end
+        
+        local c = LocalPlayer.Character
+        if not c then return end
+        local root = c:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        
+        local d = (b.Position - root.Position).Magnitude
+        
+        if d < distanciaCatch then
+            local tm = obterToolManagement()
+            local sucesso = false
+            
+            if tm then
+                pcall(function() tm.attachBall(b) end)
+                sucesso = true
+                print("🤲 Auto Catch! (ToolManagement.attachBall)")
+            else
+                local backpack = LocalPlayer:FindFirstChild("Backpack")
+                if backpack then
+                    local long = backpack:FindFirstChild("Long")
+                    if long then
+                        local gk = long:Find
