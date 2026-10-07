@@ -1,6 +1,6 @@
 -- ======================================================
 -- MARITACA HUB - Futebol Clássico (COMPLETO)
--- Versão: 32.0 - Auto Dive com restauração de estado
+-- Versão: 33.0 - Final
 -- ======================================================
 
 print("=== [1/5] INICIANDO ===")
@@ -88,7 +88,6 @@ local TEXTURA_CHAMPIONS = 6631377470
 local screenGui = nil
 local fechado = false
 local toolManagementCache = nil
-local estadoOriginalSalvo = nil
 
 -- ==================== FECHAR ====================
 local function fecharScript()
@@ -370,48 +369,41 @@ local function ativarReach(estado)
     end
 end
 
--- ==================== GK - AUTO DIVE (COM RESTAURAÇÃO DE ESTADO) ====================
+-- ==================== GK - AUTO DIVE ====================
 local function iniciarAutoDive()
     if conexaoAutoDive then conexaoAutoDive:Disconnect() end
     conexaoAutoDive = RunService.Heartbeat:Connect(function()
         if not autoDiveAtivo then return end
-        
+
         local agora = tick()
         if agora - ultimaDefesa < 0.8 then return end
-        
+
         local bola = obterBolaOficial()
         if not bola then return end
-        
+
         local c = LocalPlayer.Character
         if not c then return end
         local root = c:FindFirstChild("HumanoidRootPart")
         local hum = c:FindFirstChild("Humanoid")
         if not root or not hum then return end
-        
-        -- 1️⃣ DISTÂNCIA
+
         local dist = (bola.Position - root.Position).Magnitude
         if dist > distanciaDive then return end
-        
-        -- 2️⃣ VELOCIDADE
+
         local velocidadeBola = bola.AssemblyLinearVelocity
         if velocidadeBola.Magnitude < 10 then return end
-        
-        -- 3️⃣ DIREÇÃO
+
         local direcaoBola = velocidadeBola.Unit
         local paraGoleiro = (root.Position - bola.Position).Unit
         local dotProduto = direcaoBola:Dot(paraGoleiro)
         if dotProduto < 0.3 then return end
-        
-        -- 4️⃣ POSIÇÃO RELATIVA
+
         local bolaRelativa = root.CFrame:PointToObjectSpace(bola.Position)
         local ladoDireita = bolaRelativa.X > 0
         local altura = bolaRelativa.Y
-        
-        -- 5️⃣ SALVA O ESTADO ORIGINAL E MUDA PRA PHYSICS
-        local estadoOriginal = hum:GetState()
+
         pcall(function() hum:ChangeState(Enum.HumanoidStateType.Physics) end)
-        
-        -- 6️⃣ TOOLMANAGEMENT
+
         local tm = obterToolManagement()
         if tm then
             pcall(function() tm.SetUsing(true) end)
@@ -421,12 +413,11 @@ local function iniciarAutoDive()
                 pcall(function() torso.AssemblyAngularVelocity = Vector3.new() end)
             end
         end
-        
-        -- 7️⃣ ANIMAÇÃO
+
         local animAnimations = ReplicatedStorage:FindFirstChild("Animations")
         local gkAnim = animAnimations and animAnimations:FindFirstChild("GK")
         local dives = gkAnim and gkAnim:FindFirstChild("Dives")
-        
+
         local animacao = nil
         if dives then
             if altura > 2 then
@@ -442,7 +433,7 @@ local function iniciarAutoDive()
             else
                 animacao = ladoDireita and dives:FindFirstChild("MidDive_R") or dives:FindFirstChild("MidDive_L")
             end
-            
+
             if animacao then
                 local animator = hum:FindFirstChildOfClass("Animator")
                 if animator then
@@ -453,8 +444,7 @@ local function iniciarAutoDive()
                 end
             end
         end
-        
-        -- 8️⃣ BODYVELOCITY COM FORÇA REAL
+
         local bodyVelocity = Instance.new("BodyVelocity")
         bodyVelocity.MaxForce = Vector3.new(1e5, 1e5, 1e5)
         local forcaLateral = ladoDireita and 35 or -35
@@ -464,16 +454,14 @@ local function iniciarAutoDive()
                               + (root.CFrame.LookVector * 10)
         bodyVelocity.Parent = root
         Debris:AddItem(bodyVelocity, 0.5)
-        
-        -- 9️⃣ APLICA FORÇA NA BOLA E RAGDOLL
+
         if tm then
             pcall(function() tm.ApplyGKForce(bola) end)
             task.delay(0.6, function()
                 pcall(function() tm.Ragdoll() end)
             end)
         end
-        
-        -- 🔟 RESTAURA O ESTADO (evita trava permanente)
+
         task.delay(1.5, function()
             pcall(function()
                 if hum and hum.Parent then
@@ -483,7 +471,7 @@ local function iniciarAutoDive()
                 end
             end)
         end)
-        
+
         ultimaDefesa = agora
         print("🧤 Auto Dive! Lado: " .. (ladoDireita and "Direita" or "Esquerda") .. " | Altura: " .. string.format("%.1f", altura))
     end)
@@ -493,36 +481,36 @@ local function pararAutoDive()
     if conexaoAutoDive then conexaoAutoDive:Disconnect() conexaoAutoDive = nil end
 end
 
--- ==================== GK - AUTO CATCH (PEGA SÓ UMA VEZ) ====================
+-- ==================== GK - AUTO CATCH ====================
 local function iniciarAutoCatch()
     if conexaoAutoCatch then conexaoAutoCatch:Disconnect() end
     jaAgarrou = false
     conexaoAutoCatch = RunService.Heartbeat:Connect(function()
         if not autoCatchAtivo then return end
-        
+
         local agora = tick()
-        
+
         if jaAgarrou then
             if agora - tempoAgarrou < 3 then return end
             jaAgarrou = false
         end
-        
+
         if agora - ultimaDefesa < 0.3 then return end
-        
+
         local b = obterBolaOficial()
         if not b then return end
-        
+
         local c = LocalPlayer.Character
         if not c then return end
         local root = c:FindFirstChild("HumanoidRootPart")
         if not root then return end
-        
+
         local d = (b.Position - root.Position).Magnitude
-        
+
         if d < distanciaCatch then
             local tm = obterToolManagement()
             local sucesso = false
-            
+
             if tm then
                 pcall(function() tm.attachBall(b) end)
                 sucesso = true
@@ -532,4 +520,258 @@ local function iniciarAutoCatch()
                 if backpack then
                     local long = backpack:FindFirstChild("Long")
                     if long then
-                        local gk = long:Find
+                        local gk = long:FindFirstChild("GK")
+                        if gk then
+                            local botao = gk:FindFirstChild("F")
+                            if botao and botao:IsA("TextButton") then
+                                pcall(function() botao:Activate() end)
+                                sucesso = true
+                                print("🤲 Auto Catch! (GK.F - Fallback)")
+                            end
+                        end
+                    end
+                end
+            end
+
+            pcall(function()
+                b.CFrame = CFrame.new(root.Position + root.CFrame.LookVector * 2)
+                b.AssemblyLinearVelocity = Vector3.new(0,0,0)
+            end)
+
+                        if sucesso then
+                jaAgarrou = true
+                tempoAgarrou = agora
+                ultimaDefesa = agora
+            end
+        end
+    end)
+end
+
+local function pararAutoCatch()
+    if conexaoAutoCatch then conexaoAutoCatch:Disconnect() conexaoAutoCatch = nil end
+    jaAgarrou = false
+end
+
+-- ==================== INTERFACE ====================
+screenGui = Instance.new("ScreenGui")
+screenGui.Name = "SaturnoFloatingGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 50, 0, 50)
+toggleBtn.Position = UDim2.new(0.02, 0, 0.2, 0)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+toggleBtn.Text = "🪐"
+toggleBtn.TextSize = 26
+toggleBtn.Parent = screenGui
+
+local bc = Instance.new("UICorner")
+bc.CornerRadius = UDim.new(1, 0)
+bc.Parent = toggleBtn
+
+local bs = Instance.new("UIStroke")
+bs.Color = Color3.fromRGB(140, 80, 220)
+bs.Thickness = 2
+bs.Parent = toggleBtn
+
+toggleBtn.MouseButton1Click:Connect(function() Window:Minimize() end)
+
+-- FPS Label
+local fpsLabel = Instance.new("TextLabel")
+fpsLabel.Size = UDim2.new(0, 80, 0, 22)
+fpsLabel.Position = UDim2.new(1, -90, 0, 10)
+fpsLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+fpsLabel.BackgroundTransparency = 0.3
+fpsLabel.Text = "FPS: --"
+fpsLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+fpsLabel.Font = Enum.Font.GothamBold
+fpsLabel.TextSize = 12
+fpsLabel.Visible = false
+fpsLabel.Parent = screenGui
+
+task.spawn(function()
+    local fc = 0
+    local lt = tick()
+    while true do
+        local ct = tick()
+        fc = fc + 1
+        if ct - lt >= 1 then
+            local fps = math.floor(fc / (ct - lt))
+            if fpsAtivo then
+                fpsLabel.Text = "FPS: " .. fps
+                if fps >= 50 then fpsLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+                elseif fps >= 30 then fpsLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+                else fpsLabel.TextColor3 = Color3.fromRGB(255, 50, 50) end
+            end
+            fc = 0
+            lt = ct
+        end
+        RunService.RenderStepped:Wait()
+    end
+end)
+
+-- ==================== ABA REACH ====================
+Tabs.Reach:AddSection("Configurações de Reach")
+Tabs.Reach:AddToggle("ReachToggle", { Title = "🎯 Reach Ativo", Default = false, Callback = function(v) ativarReach(v) end })
+Tabs.Reach:AddToggle("EsferaToggle", { Title = "👁️ Mostrar Esfera", Default = true, Callback = function(v) circuloVisivel = v end })
+Tabs.Reach:AddToggle("ChuteToggle", { Title = "⚽ Chute Automático", Default = true, Callback = function(v) chuteAutomatico = v end })
+Tabs.Reach:AddButton({ Title = "➕ AUMENTAR REACH (+1)", Callback = function()
+    if tamanhoReach < 15 then
+        tamanhoReach = tamanhoReach + 1
+        if reachAtivo and circulo then circulo.Size = Vector3.new(tamanhoReach*2, tamanhoReach*2, tamanhoReach*2) end
+    end
+end })
+Tabs.Reach:AddButton({ Title = "➖ DIMINUIR REACH (-1)", Callback = function()
+    if tamanhoReach > 1 then
+        tamanhoReach = tamanhoReach - 1
+        if reachAtivo and circulo then circulo.Size = Vector3.new(tamanhoReach*2, tamanhoReach*2, tamanhoReach*2) end
+    end
+end })
+Tabs.Reach:AddButton({ Title = "🔄 RESETAR (8)", Callback = function()
+    tamanhoReach = 8
+    if reachAtivo and circulo then circulo.Size = Vector3.new(16, 16, 16) end
+end })
+Tabs.Reach:AddSlider("ForcaSlider", { Title = "💥 Força do Chute", Default = 80, Min = 20, Max = 200, Rounding = 0, Callback = function(v) forcaChute = math.floor(v) end })
+
+-- ==================== ABA AUTOBALL ====================
+Tabs.AutoBall:AddSection("⚡ Teleporte")
+Tabs.AutoBall:AddButton({ Title = "⚡ TELEPORTAR (1x)", Callback = function() acaoTP() end })
+Tabs.AutoBall:AddToggle("TPLoopToggle", { Title = "🔁 TP LOOP", Default = false, Callback = function(v)
+    tpLoopAtivo = v
+    if tpLoopAtivo then iniciarTPLoop() else pararTPLoop() end
+end })
+Tabs.AutoBall:AddSection("🤖 Follow Ball")
+Tabs.AutoBall:AddToggle("FollowToggle", { Title = "🤖 Follow Ball", Default = false, Callback = function(v) ativarFollow(v) end })
+
+-- ==================== ABA GK ====================
+Tabs.GK:AddSection("🧤 Funções de Goleiro")
+Tabs.GK:AddToggle("AutoDiveToggle", { Title = "🧤 Auto Dive", Description = "Pula na bola com física real", Default = false, Callback = function(v)
+    autoDiveAtivo = v
+    if autoDiveAtivo then
+        iniciarAutoDive()
+        Fluent:Notify({ Title = "🧤 Auto Dive", Content = "ATIVADO!", Duration = 2 })
+    else
+        pararAutoDive()
+        Fluent:Notify({ Title = "🧤 Auto Dive", Content = "Desativado.", Duration = 2 })
+    end
+end })
+Tabs.GK:AddToggle("AutoCatchToggle", { Title = "🤲 AC (Auto Catch)", Description = "Agarra 1x e espera 3s", Default = false, Callback = function(v)
+    autoCatchAtivo = v
+    if autoCatchAtivo then
+        iniciarAutoCatch()
+        Fluent:Notify({ Title = "🤲 Auto Catch", Content = "ATIVADO!", Duration = 2 })
+    else
+        pararAutoCatch()
+        Fluent:Notify({ Title = "🤲 Auto Catch", Content = "Desativado.", Duration = 2 })
+    end
+end })
+Tabs.GK:AddSlider("DistDiveSlider", { Title = "Distância do Dive", Default = 60, Min = 20, Max = 150, Rounding = 0, Callback = function(v) distanciaDive = math.floor(v) end })
+Tabs.GK:AddSlider("DistCatchSlider", { Title = "Distância do Catch", Default = 5, Min = 1, Max = 15, Rounding = 0, Callback = function(v) distanciaCatch = math.floor(v) end })
+
+-- ==================== ABA FPS ====================
+Tabs.FPS:AddSection("Otimização")
+Tabs.FPS:AddToggle("FPSView", { Title = "📊 Visualizar FPS", Default = false, Callback = function(v)
+    fpsAtivo = v
+    fpsLabel.Visible = v
+end })
+Tabs.FPS:AddToggle("FPSBoost", { Title = "Reduzir Gráficos (Boost FPS)", Default = false, Callback = function(v)
+    if v then
+        for _, obj in pairs(game:GetDescendants()) do
+            if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") or obj:IsA("Fire") then
+                pcall(function() obj.Enabled = false end)
+            end
+        end
+    end
+end })
+
+-- ==================== ABA SKINBALL ====================
+Tabs.SkinBall:AddSection("🎨 Skins Prontas")
+Tabs.SkinBall:AddButton({ Title = "🟠 APLICAR CHAMPIONS LARANJA", Description = "Possivelmente com bugs", Callback = function()
+    local ok = aplicarTexturaBola(TEXTURA_CHAMPIONS)
+    if ok then Fluent:Notify({ Title = "🟠 Champions", Content = "Aplicada!", Duration = 3 })
+    else Fluent:Notify({ Title = "⚠️ Erro", Content = "Não foi possível.", Duration = 3 }) end
+end })
+Tabs.SkinBall:AddSection("📝 Inserir Textura")
+Tabs.SkinBall:AddInput("SkinIDInput", { Title = "Inserir Textura", Description = "Bote o ID (ex: 28273817)", Default = "", Placeholder = "Bote o ID aqui...", Numeric = true, Finished = false, Callback = function(v) idTexturaPersonalizado = v end })
+Tabs.SkinBall:AddButton({ Title = "✅ APLICAR TEXTURA", Callback = function()
+    local id = tostring(idTexturaPersonalizado)
+    if id == "" or id == "nil" then Fluent:Notify({ Title = "⚠️", Content = "Digite um ID!", Duration = 3 }) return end
+    id = id:gsub("rbxassetid://", ""):gsub("http://www.roblox.com/asset/?id=", ""):gsub("https://www.roblox.com/asset/?id=", "")
+    local ok = aplicarTexturaBola(id)
+    if ok then Fluent:Notify({ Title = "✅ Aplicada", Content = "ID: " .. id, Duration = 3 })
+    else Fluent:Notify({ Title = "⚠️ Erro", Content = "Não foi possível.", Duration = 3 }) end
+end })
+Tabs.SkinBall:AddSection("🔄 Remover")
+Tabs.SkinBall:AddButton({ Title = "🔄 REMOVER SKIN", Callback = function()
+    local ss = workspace:FindFirstChild("WorkspaceStadiumSounds")
+    if ss then
+        local tps = ss:FindFirstChild("TPS")
+        if tps then
+            local tex = tps:FindFirstChild("Texture")
+            if tex and (tex:IsA("Decal") or tex:IsA("Texture")) then tex.Texture = "" end
+        end
+    end
+    Fluent:Notify({ Title = "🔄", Content = "Removida.", Duration = 2 })
+end })
+
+-- ==================== ABA OPÇÕES ====================
+Tabs.Opcoes:AddSection("Sobre")
+Tabs.Opcoes:AddParagraph({
+    Title = "Maritaca Hub v33.0",
+    Content = "• TP + TP Loop\n• Follow corrigido\n• Reach Big Foot\n• Auto Dive (física real + restauração)\n• Auto Catch (pega 1x + espera 3s)\n• Skin Champions Laranja\n• Visualizador de FPS"
+})
+
+Tabs.Opcoes:AddSection("⚠️ Zona de Perigo")
+Tabs.Opcoes:AddButton({ 
+    Title = "❌ FECHAR SCRIPT", 
+    Callback = function() fecharScript() end 
+})
+
+-- ==================== NOTIFICAÇÃO ====================
+task.spawn(function()
+    task.wait(2)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = "🪐 Maritaca Hub",
+            Text = "Aproveite :)",
+            Duration = 5
+        })
+    end)
+end)
+
+-- ==================== AUTO-FECHAR ====================
+Players.PlayerRemoving:Connect(function(plr)
+    if plr == LocalPlayer then fecharScript() end
+end)
+
+-- ==================== RESET AO MORRER ====================
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    character = newChar
+    humanoidRootPart = newChar:WaitForChild("HumanoidRootPart")
+    humanoid = newChar:WaitForChild("Humanoid")
+    toolManagementCache = nil
+    if seguindo then
+        seguindo = false
+        if conexaoFollow then conexaoFollow:Disconnect() conexaoFollow = nil end
+    end
+    if reachAtivo then
+        if conexaoReach then conexaoReach:Disconnect() conexaoReach = nil end
+        if circulo then circulo:Destroy() circulo = nil end
+        criarCirculo()
+    end
+    if tpLoopAtivo then
+        if conexaoTPLoop then conexaoTPLoop:Disconnect() conexaoTPLoop = nil end
+        iniciarTPLoop()
+    end
+end)
+
+Fluent:Notify({
+    Title = "🪐 Maritaca Hub",
+    Content = "Painel iniciado!",
+    Duration = 4
+})
+
+Window:SelectTab(1)
+
+print("=== [5/5] SCRIPT CARREGADO COM SUCESSO! ===")
